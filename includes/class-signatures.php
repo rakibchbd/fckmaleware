@@ -75,11 +75,11 @@ final class Signatures {
 	public static function from_file( string $path ): self {
 		$raw = is_readable( $path ) ? file_get_contents( $path ) : false; // phpcs:ignore WordPress.WP.AlternativeFunctions
 		if ( false === $raw ) {
-			throw new \RuntimeException( "Cannot read signature file: {$path}" );
+			throw new \RuntimeException( "Cannot read signature file: {$path}" ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- escaped where displayed.
 		}
 		$data = json_decode( $raw, true );
 		if ( ! is_array( $data ) ) {
-			throw new \RuntimeException( "Signature file is not valid JSON: {$path}" );
+			throw new \RuntimeException( "Signature file is not valid JSON: {$path}" ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- escaped where displayed.
 		}
 		return new self( $data );
 	}

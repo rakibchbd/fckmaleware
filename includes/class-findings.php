@@ -303,7 +303,7 @@ final class Findings {
 		global $wpdb;
 		$table = self::table();
 		return (bool) $wpdb->get_var( // phpcs:ignore WordPress.DB
-			$wpdb->prepare( "SELECT 1 FROM {$table} WHERE status = 'open' AND object_type = 'file' AND object_ref = %s AND signature_id = %s LIMIT 1", substr( $file, 0, 191 ), $signature_id )
+			$wpdb->prepare( "SELECT 1 FROM {$table} WHERE status = 'open' AND object_type = 'file' AND object_ref = %s AND signature_id = %s LIMIT 1", substr( $file, 0, 191 ), $signature_id ) // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name only.
 		);
 	}
 
@@ -312,7 +312,7 @@ final class Findings {
 		global $wpdb;
 		$table = self::table();
 		return (bool) $wpdb->get_var( // phpcs:ignore WordPress.DB
-			$wpdb->prepare( "SELECT 1 FROM {$table} WHERE status = 'ignored' AND object_ref = %s AND signature_id = %s LIMIT 1", substr( $file, 0, 191 ), $signature_id )
+			$wpdb->prepare( "SELECT 1 FROM {$table} WHERE status = 'ignored' AND object_ref = %s AND signature_id = %s LIMIT 1", substr( $file, 0, 191 ), $signature_id ) // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name only.
 		);
 	}
 

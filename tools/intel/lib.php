@@ -251,7 +251,9 @@ final class IntelPipeline {
 		}
 		$body = curl_exec( $ch );
 		$code = (int) curl_getinfo( $ch, CURLINFO_RESPONSE_CODE );
-		curl_close( $ch );
+		if ( PHP_VERSION_ID < 80000 ) {
+			curl_close( $ch ); // phpcs:ignore PHPCompatibility.FunctionUse.RemovedFunctions -- only called before PHP 8.0, where it is needed.
+		}
 		if ( false === $body || $code >= 400 ) {
 			fwrite( STDERR, "  {$url}: HTTP {$code}\n" );
 			return null;

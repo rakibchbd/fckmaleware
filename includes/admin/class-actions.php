@@ -262,7 +262,7 @@ final class Actions {
 		header( 'Content-Type: text/csv; charset=utf-8' );
 		header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
 		$out = fopen( 'php://output', 'w' ); // phpcs:ignore WordPress.WP.AlternativeFunctions
-		fputcsv( $out, $columns );
+		fputcsv( $out, $columns, ',', '"', '\\' );
 		foreach ( $rows as $row ) {
 			$line = array();
 			foreach ( $columns as $column ) {
@@ -270,7 +270,7 @@ final class Actions {
 				$value  = (string) ( $row[ $column ] ?? '' );
 				$line[] = preg_match( '/^[=+\-@\t\r]/', $value ) ? "'" . $value : $value;
 			}
-			fputcsv( $out, $line );
+			fputcsv( $out, $line, ',', '"', '\\' );
 		}
 		fclose( $out ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 		exit;
@@ -287,6 +287,7 @@ final class Actions {
 
 	public function ajax_scan_start(): void {
 		$this->ajax_guard();
+		// phpcs:disable WordPress.Security.NonceVerification.Missing -- verified in ajax_guard().
 		$mode  = sanitize_key( wp_unslash( $_POST['mode'] ?? 'standard' ) );
 		$state = $this->plugin->scanner()->start(
 			$mode,
@@ -296,6 +297,7 @@ final class Actions {
 				'days'  => absint( $_POST['days'] ?? 7 ),
 			)
 		);
+		// phpcs:enable
 		if ( is_wp_error( $state ) ) {
 			wp_send_json_error( array( 'message' => $state->get_error_message() ) );
 		}

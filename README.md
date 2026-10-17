@@ -1,122 +1,104 @@
-# fckmaleware
-Experience the power of AI-optimized malware protection, proudly crafted from bamboo (because steel is way beyond our budget). Feel the difference. Embrace the innovation. Take it inside.™
+# FCK Malware
 
----
+Free, open-source malware protection for WordPress. It needs no paid service, no API key and no account.
 
-FckMaleware is a WordPress plugin that finds, reports and quarantines malware using three sources:
+- It scans files and the database with several independent detection layers.
+- It watches the events attackers use to get in and stay in.
+- It cleans up safely: every change can be undone.
+- Detection rules are updated through a signed feed.
+- Imunify360 and an AI second opinion are optional add-ons.
 
-1. **Built-in signatures**: 26 regex signatures (`signatures/signatures.json`) for PHP backdoors and web shells, obfuscated loaders, JavaScript injections, malicious `.htaccess` / `.user.ini` rules and PHP hidden inside images.
-2. **Core integrity**: every file in `wp-admin/`, `wp-includes/` and the root is compared with the official WordPress.org checksums for your version, and unknown PHP files in core directories are flagged.
-3. **Imunify360 / ImunifyAV**: if the agent is installed on the server, its malicious-file list for this site is pulled into the same findings list, and you can start an Imunify on-demand scan of the site from WordPress.
+Requires WordPress 5.8+ and PHP 7.4+. Works on single sites and multisite networks (network-activated, managed from Network Admin), and on shared hosting: no daemons, no root, no extra PHP extensions beyond what WordPress needs. Signature verification uses libsodium: PHP's `sodium` extension, or WordPress's bundled `sodium_compat` where the extension is missing.
 
-There's also a location rule (PHP files inside `wp-content/uploads`) and an optional hardening switch that blocks PHP execution in uploads.
+## What it does
+
+| Area | How |
+|---|---|
+| **Signatures** | 45 hand-written rules (44 regex, 1 byte pattern) for PHP backdoors, web shells, obfuscated loaders, JavaScript and SEO-spam injections, malicious `.htaccess`/`.user.ini` rules and PHP hidden in images. Every rule is validated, stress-tested for catastrophic backtracking, and checked against 40,761 clean WordPress files before release. The engine also matches exact SHA-256 hashes of known malware; feed updates can add them, though none ship yet. |
+| **Heuristics** | A token-based analyser that finds *unknown* malware by what the code does: request input reaching `eval`/shell functions, assembled or hidden function names, decoded payloads being executed, packed lines, high-entropy blobs and more. It never runs the code. Calibration: 0 false positives on the 40,761-file clean corpus; all 28 malware fixtures detected. |
+| **Integrity** | WordPress core and wordpress.org plugins are compared with official checksums. Other plugins and themes get a local baseline on the first standard scan, so later changes stand out. Missing core files and unknown PHP in core folders are reported. |
+| **Behaviour and persistence** | Hidden or newly created administrators, role and capability takeover, a changed `default_role` or site URL, `auto_prepend_file`, malicious cron payloads and hook callbacks built with `eval`. |
+| **Database** | Posts, options and comments on every site are checked for injected scripts, hidden links and PHP. Findings link to the right editor. Serialized data is never search-and-replaced. |
+| **Event-driven protection** | Malicious uploads are refused before they are saved. Plugins and themes are checked right after install or update. Administrator and security-option changes trigger alerts. |
+| **Remediation** | Quarantine keeps a compressed copy that is verified before the original is removed. "Replace with official copy" downloads the wordpress.org original, verifies its checksum and backs up the old file first. Restore points cover every action and bulk action. Automatic quarantine is opt-in and limited to very high-confidence cases. |
+| **Hardening** | Six optional rules, each with risk, compatibility and undo notes, plus nine report-only checks. |
+| **Updates** | Plugin releases come from GitHub through the normal WordPress update screen. Signature databases come from an Ed25519-signed feed with expiry, anti-replay and rollback. |
+| **Notifications** | Grouped e-mail alerts with cooldowns, plus HMAC-signed webhooks (public addresses only). |
+| **Dashboard** | 14 sections: overview with an explained health score, scanner, findings, quarantine, real-time, hardening, AI, signatures, threat intel, schedule, reports, activity log, integrations, settings. Every number comes from the site's own records. |
+| **Imunify360** (optional) | If the agent is on the server, its malicious-file list for the site is imported as findings. Its proprietary signatures are never copied. |
+| **AI second opinion** (optional, off by default) | An administrator can send a redacted excerpt of one finding to Anthropic Claude or any OpenAI-compatible endpoint, including a self-hosted model. The answer is advisory: the model cannot change, delete or run anything. |
 
 ## Install
 
-Copy this repository into `wp-content/plugins/fckmaleware/` and activate **FckMaleware**. Requires WordPress 5.8+ and PHP 7.4+.
+1. Download `fckmaleware.zip` from the [latest release](https://github.com/rakibchbd/fckmaleware/releases/latest).
+2. Upload it in **Plugins → Add New → Upload Plugin**, then activate it (network-activate on multisite).
+3. Open **FCK Malware → Malware Scanner** and run a **Standard** scan. It records integrity baselines for plugins and themes that are not on wordpress.org.
 
-## Updates
+Later versions appear in **Dashboard → Updates** like any other plugin.
 
-Installed sites update straight from this GitHub repository. Updates appear on *Dashboard → Updates* and the Plugins screen like any wordpress.org plugin, with "View details", one-click update and the auto-update toggle.
+## Scan modes
 
-To ship an update:
+| Mode | Reads | Use |
+|---|---|---|
+| Quick | PHP, `.htaccess`, `.ini`; skips files unchanged since they were found clean | Frequent checks |
+| Standard | Every scannable file; skips unchanged clean files | Default, scheduled |
+| Deep | Every file including images, no cache | After a compromise |
+| Core | WordPress core against official checksums | After a core update or suspicion |
+| Recent | Files modified in the last N days | Incident triage |
+| Custom | One directory | Investigating a plugin or folder |
 
-1. Bump the version in `fckmaleware.php`, in **both** the `Version:` header and `FCKMW_VERSION`.
-2. Merge to `main`.
+Scans run in steps of a few seconds through AJAX, WP-Cron or WP-CLI. They resume exactly where they stopped and never hit PHP time limits. Files over the size limit are listed in the scan result, not silently skipped.
 
-The **Release** workflow (`.github/workflows/release.yml`) then:
-
-- runs the tests;
-- builds `fckmaleware.zip` (without `tests/`, `tools/` and `.github/`, see `.distignore`);
-- publishes a GitHub release `v<version>` with generated notes.
-
-Pushes that don't change the version publish nothing.
-
-Sites check the latest release every 6 hours. *Check again* on Dashboard → Updates checks immediately. If a release has no `fckmaleware.zip` asset, the source zipball is used and its folder is renamed to match the installed plugin. Releases marked as drafts or pre-releases are never offered.
-
-## Using it
-
-**Admin → FckMaleware**
-
-- **Findings**: severity summary, a *Scan now* button with live progress, and the findings table. For each finding you can:
-  - **Quarantine** the file (all findings on that file move with it).
-  - **Ignore** it. It stays ignored until the file content changes.
-  - Mark it **Resolved**. It comes back on the next scan if the problem is still there.
-- **Quarantine**: restore or permanently delete quarantined files.
-- **Imunify360**: agent status, *Sync detections now*, *Start Imunify360 scan of this site*.
-- **Signatures**: the loaded signature database.
-- **Settings**: scan schedule, file size limit, core integrity, image scanning, uploads PHP blocking, email alerts, and the Imunify options.
-
-**WP-CLI**
+## WP-CLI
 
 ```sh
-wp fckmaleware scan                 # full scan; exits 1 if critical/high findings remain
-wp fckmaleware findings --status=open --format=json
-wp fckmaleware quarantine <finding-id>
+wp fckmaleware scan [--mode=quick|standard|deep|core|recent|custom] [--dir=<path>] [--days=<n>] [--format=table|json]
+wp fckmaleware findings [--status=open|quarantined|ignored|resolved] [--source=<layer>] [--format=json]
+wp fckmaleware db-scan
+wp fckmaleware persistence
+wp fckmaleware quarantine <finding-id>      # verified copy kept
+wp fckmaleware repair <finding-id>          # official wordpress.org copy
+wp fckmaleware accept <finding-id>
+wp fckmaleware restore <key>
+wp fckmaleware quarantine-list
+wp fckmaleware rollback [<point>]
 wp fckmaleware signatures
+wp fckmaleware signature-updates status|update|rollback
+wp fckmaleware hardening status|enable <rule>|disable <rule>
+wp fckmaleware ai-review <finding-id> [--show-request]
+wp fckmaleware feedback report|export
+wp fckmaleware notify-test
 wp fckmaleware imunify status|sync|scan
 ```
 
-The scan exit code makes `wp fckmaleware scan` usable as a deploy or CI gate.
+`wp fckmaleware scan` exits with status 1 when critical or high findings remain, so it can gate a deploy.
 
-## How it works
+## Limits, stated plainly
 
-- **Resumable scanning.** A scan first writes the list of candidate files to a private directory, then processes it in time-boxed steps: 8 s per AJAX request in the admin, 20 s per WP-Cron run (re-queued every 30 s until done), or a single loop under WP-CLI. Long scans therefore survive shared-hosting time limits.
-- **What gets scanned.** PHP-like files (`.php`, `.phtml`, `.phar`, `.inc`, …), JS, HTML/SVG, `.htaccess`, `.user.ini`/`php.ini` and `.ico` files. PNG/JPG/GIF/WebP are added if *Scan images* is enabled. Symlinks, VCS folders, files over the size limit, the plugin itself and its data folder are skipped. Add more exclusions with the `fckmw_scan_exclude_dirs` filter.
-- **Quarantine.** The file is compressed into `wp-content/uploads/fckmaleware/quarantine/`. That directory is protected by deny rules, and the stored copies are not valid PHP. The original is then deleted. Restore checks the SHA-256 of the copy and never overwrites an existing file.
-- **Core and config files are never quarantined.** WordPress core files and `wp-config.php` are refused, because deleting them takes the site down; reinstall core from *Dashboard → Updates* or clean `wp-config.php` by hand instead. Unknown files sitting in core directories *can* be quarantined.
-- **Data.** Findings live in `{prefix}fckmw_findings`; settings and quarantine metadata live in options. Uninstalling removes all of it, including quarantined files and the uploads `.htaccess` rule.
+- **Real-time protection is event-driven.** WordPress has no file-system hooks, so files changed outside WordPress (FTP, another account on the server) are found by the next scheduled scan, not instantly.
+- **WP-Cron needs traffic** or a system cron calling `wp-cron.php`. With `DISABLE_WP_CRON` and no system cron, scheduled scans do not run. The dashboard warns about this.
+- **Plugins and themes not on wordpress.org** have no official checksums. Their baseline records whatever is on disk at the first standard scan, so a component that was already infected then is only covered by the signature and heuristic layers.
+- **Heuristics flag behaviour, not intent.** A legitimate file-manager or backup plugin can look like a web shell. Review findings before acting; "Accept as safe" remembers your decision until the file changes.
+- **The signature set is small and new.** It complements, not replaces, server-side scanners and a clean backup.
 
-## Imunify360 setup
+## Documentation
 
-The plugin talks to the local agent CLI (`/usr/bin/imunify360-agent` or `/usr/bin/imunify-antivirus`) with `--json`. It is called without a shell, and the binary path is restricted to those known locations. Commands used:
+- [Architecture](docs/ARCHITECTURE.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Privacy and data handling](docs/PRIVACY.md)
+- [Threat-intelligence sources and licences](docs/THREAT-INTEL-SOURCES.md)
+- [Attribution](docs/ATTRIBUTION.md)
+- [Upgrading from 0.x](docs/MIGRATION.md)
+- [Releasing and signing](docs/RELEASING.md)
+- [Testing and results](docs/TESTING.md)
+- [Changelog](CHANGELOG.md)
+- [1.0 audit](docs/AUDIT.md) and [plan](docs/ROADMAP.md)
 
-| Purpose | Command |
-| --- | --- |
-| Status | `imunify360-agent version` |
-| Sync detections | `imunify360-agent malware malicious list --json --limit 1000` |
-| Scan this site | `imunify360-agent malware on-demand start --path <ABSPATH>` |
+## Reporting
 
-Only detections whose path is inside this WordPress install are imported. Entries Imunify has already cleaned are skipped.
+- **False positives and missed malware:** use the links on each finding, which open a pre-filled GitHub issue you review before sending.
+- **Security issues in the plugin itself:** please report them privately through GitHub's *Report a vulnerability* on this repository.
 
-The agent usually requires root. If the PHP user cannot run it, enable **Run through sudo** in Settings and add a sudoers rule that allows exactly these commands, for example (`visudo -f /etc/sudoers.d/fckmaleware`, adjust the user and path):
+## Licence
 
-```
-www-data ALL=(root) NOPASSWD: /usr/bin/imunify360-agent version, \
-  /usr/bin/imunify360-agent malware malicious list --json --limit 1000, \
-  /usr/bin/imunify360-agent malware on-demand start --path /var/www/html/
-```
-
-`proc_open` must not be in `disable_functions`.
-
-## Blocking PHP in uploads on nginx
-
-The *Block PHP in uploads* setting writes an `.htaccess` rule, so it only works on Apache/LiteSpeed. On nginx, add this to the server block instead:
-
-```nginx
-location ~* ^/wp-content/uploads/.*\.(?:php[0-9]?|phtml|phar|pht)$ { deny all; }
-```
-
-## Signatures
-
-Signatures are defined in `tools/build-signatures.php` and compiled to `signatures/signatures.json`:
-
-```sh
-php tools/build-signatures.php
-```
-
-Each entry has an `id`, `name`, `severity` (`critical`/`high`/`medium`/`low`), `targets` (`php`, `js`, `html`, `htaccess`, `ini`, `image` or `any`) and a PCRE `pattern`. A pattern that does not compile is skipped and reported on the Signatures tab rather than breaking scans. To use your own database file, point the `fckmw_signature_file` filter at it.
-
-## Tests
-
-```sh
-php tests/run.php
-```
-
-These standalone tests need no WordPress. They check that every pattern compiles, that every signature has a matching sample, that a set of ordinary WordPress code produces no findings, and that Imunify's JSON is parsed correctly.
-
-## Hooks
-
-- `fckmw_signature_file` (filter): path to the signature JSON.
-- `fckmw_scan_exclude_dirs` (filter): absolute directories to skip.
-- `fckmw_scan_complete` (action): fires with the final scan state after a full scan.
+GPL-3.0-or-later. Third-party rule content keeps its own licence; see [docs/ATTRIBUTION.md](docs/ATTRIBUTION.md).

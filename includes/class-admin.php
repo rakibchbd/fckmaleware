@@ -45,7 +45,22 @@ final class Admin {
 		add_action( is_multisite() ? 'network_admin_menu' : 'admin_menu', array( $this, 'menu' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'assets' ) );
 		add_filter( is_multisite() ? 'network_admin_plugin_action_links_' . plugin_basename( FCKMW_FILE ) : 'plugin_action_links_' . plugin_basename( FCKMW_FILE ), array( $this, 'action_links' ) );
+		add_action( is_multisite() ? 'network_admin_notices' : 'admin_notices', array( $this, 'schema_notice' ) );
 		( new Actions( $this->plugin ) )->register();
+	}
+
+	/** A failed database upgrade must not go unnoticed: findings could not be stored. */
+	public function schema_notice(): void {
+		$error = get_option( 'fckmw_schema_error' );
+		if ( ! is_array( $error ) || ! Ui::can() ) {
+			return;
+		}
+		printf(
+			'<div class="notice notice-error"><p><strong>%1$s</strong> %2$s</p><p><code>%3$s</code></p></div>',
+			esc_html__( 'FCK Malware could not upgrade its database tables.', 'fckmaleware' ),
+			esc_html__( 'Scanning results cannot be stored until this is fixed. The upgrade is retried on every request; check that the database user may ALTER and CREATE tables.', 'fckmaleware' ),
+			esc_html( trim( implode( ', ', (array) ( $error['missing'] ?? array() ) ) . ' ' . (string) ( $error['db_error'] ?? '' ) ) )
+		);
 	}
 
 	public function menu(): void {

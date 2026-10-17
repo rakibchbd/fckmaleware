@@ -516,7 +516,7 @@ final class Heuristics {
 		if ( T_STRING === $id ) {
 			return strtolower( $text );
 		}
-		if ( defined( 'T_NAME_FULLY_QUALIFIED' ) && T_NAME_FULLY_QUALIFIED === $id ) {
+		if ( defined( 'T_NAME_FULLY_QUALIFIED' ) && T_NAME_FULLY_QUALIFIED === $id ) { // phpcs:ignore PHPCompatibility.Constants.NewConstants -- guarded (PHP 8.0+).
 			return strtolower( ltrim( $text, '\\' ) );
 		}
 		return null;
@@ -525,7 +525,7 @@ final class Heuristics {
 	private static function is_method_or_declaration( array $prev ): bool {
 		$ids = array( T_OBJECT_OPERATOR, T_DOUBLE_COLON, T_FUNCTION, T_NEW, T_CONST );
 		if ( defined( 'T_NULLSAFE_OBJECT_OPERATOR' ) ) {
-			$ids[] = T_NULLSAFE_OBJECT_OPERATOR;
+			$ids[] = T_NULLSAFE_OBJECT_OPERATOR; // phpcs:ignore PHPCompatibility.Constants.NewConstants -- guarded (PHP 8.0+).
 		}
 		return in_array( $prev[0], $ids, true );
 	}
