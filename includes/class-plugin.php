@@ -54,6 +54,7 @@ final class Plugin {
 
 		( new Updater() )->register();
 		$this->monitor()->register();
+		$this->remediation()->register();
 
 		if ( is_admin() ) {
 			( new Admin( $this ) )->register();
@@ -198,26 +199,19 @@ final class Plugin {
 		return new Imunify( (string) Settings::get( 'imunify_binary' ), (bool) Settings::get( 'imunify_use_sudo' ) );
 	}
 
-	// --- Remediation helpers (expanded by the Remediation service) -------------
+	public function remediation(): Remediation {
+		return $this->service(
+			'remediation',
+			function () {
+				return new Remediation( $this );
+			}
+		);
+	}
 
 	/** @return true|\WP_Error */
 	public function quarantine_finding( int $id ) {
-		$finding = $this->findings()->get( $id );
-		if ( ! $finding || 'open' !== $finding['status'] || 'file' !== $finding['object_type'] ) {
-			return new \WP_Error( 'fckmw_unknown', __( 'Finding not found, not open, or not a file.', 'fckmaleware' ) );
-		}
-		$key = $this->quarantine_path( $finding['file'] );
+		$key = $this->remediation()->quarantine( $id );
 		return is_wp_error( $key ) ? $key : true;
-	}
-
-	/** @return string|\WP_Error Quarantine key. */
-	public function quarantine_path( string $file ) {
-		$key = $this->quarantine()->isolate( $file, $this->is_foreign_core_file( $file ) );
-		if ( ! is_wp_error( $key ) ) {
-			$this->findings()->set_status_for_file( $file, 'quarantined', $key );
-			ActivityLog::log( 'quarantine.isolate', sprintf( /* translators: %s: file */ __( 'Quarantined %s', 'fckmaleware' ), $file ), array( 'file' => $file, 'key' => $key ), 'notice' );
-		}
-		return $key;
 	}
 
 	public function release_quarantine_findings( string $key, string $status ): void {
@@ -229,11 +223,7 @@ final class Plugin {
 	 * files in core locations that the integrity check found are not part of WordPress.
 	 */
 	public function can_quarantine( string $file ): bool {
-		return ! Paths::is_core( $file ) || $this->is_foreign_core_file( $file );
-	}
-
-	private function is_foreign_core_file( string $file ): bool {
-		return $this->findings()->has_open( $file, 'FMW-INT-002' );
+		return ! Paths::is_core( $file ) || $this->findings()->has_open( $file, 'FMW-INT-002' );
 	}
 
 	/**
@@ -320,6 +310,11 @@ final class Plugin {
 	public function daily_maintenance(): void {
 		ActivityLog::prune();
 		$this->findings()->prune_resolved( 90 );
+		$expired = $this->quarantine()->expire( (int) Settings::get( 'quarantine_retention' ) );
+		if ( $expired ) {
+			ActivityLog::log( 'quarantine.expired', sprintf( /* translators: %d: count */ __( 'Deleted %d quarantined copies past the retention period.', 'fckmaleware' ), $expired ), array( 'count' => $expired ) );
+		}
+		$this->persistence()->run( 'daily' );
 	}
 
 	// --- Lifecycle ------------------------------------------------------------

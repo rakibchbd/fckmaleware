@@ -44,6 +44,7 @@ final class SignatureLayer implements Layer {
 	public static function detection( array $sig, int $line, string $excerpt, string $evidence ): array {
 		return array(
 			'source'         => 'signature',
+			'technique'      => $sig['technique'],
 			'signature_id'   => $sig['id'],
 			'signature_name' => $sig['name'],
 			'family'         => $sig['family'],

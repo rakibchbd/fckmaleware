@@ -165,7 +165,7 @@ final class CLI {
 	}
 
 	/**
-	 * Move the file behind a finding to quarantine.
+	 * Move the file behind a finding to quarantine (verified backup first).
 	 *
 	 * ## OPTIONS
 	 *
@@ -175,11 +175,106 @@ final class CLI {
 	 * @when after_wp_load
 	 */
 	public function quarantine( array $args ): void {
-		$result = $this->plugin->quarantine_finding( (int) $args[0] );
+		$key = $this->plugin->remediation()->quarantine( (int) $args[0] );
+		if ( is_wp_error( $key ) ) {
+			\WP_CLI::error( $key->get_error_message() );
+		}
+		\WP_CLI::success( "File quarantined (key {$key})." );
+	}
+
+	/**
+	 * Replace a modified or missing core / wordpress.org plugin file with the verified official copy.
+	 *
+	 * ## OPTIONS
+	 *
+	 * <id>
+	 * : Finding ID (FMW-INT-001, FMW-INT-003 or FMW-INT-010).
+	 *
+	 * @when after_wp_load
+	 */
+	public function repair( array $args ): void {
+		$result = $this->plugin->remediation()->repair( (int) $args[0] );
 		if ( is_wp_error( $result ) ) {
 			\WP_CLI::error( $result->get_error_message() );
 		}
-		\WP_CLI::success( 'File quarantined.' );
+		\WP_CLI::success( 'File restored from the verified official copy. If a modified version existed it is kept as a backup (see quarantine-list).' );
+	}
+
+	/**
+	 * Restore a quarantined file or a pre-repair backup.
+	 *
+	 * ## OPTIONS
+	 *
+	 * <key>
+	 * : Quarantine key (see `wp fckmaleware quarantine-list`).
+	 *
+	 * @when after_wp_load
+	 */
+	public function restore( array $args ): void {
+		$result = $this->plugin->remediation()->restore( (string) $args[0] );
+		if ( is_wp_error( $result ) ) {
+			\WP_CLI::error( $result->get_error_message() );
+		}
+		\WP_CLI::success( 'Restored.' );
+	}
+
+	/**
+	 * List quarantined files and backups.
+	 *
+	 * @subcommand quarantine-list
+	 * @when after_wp_load
+	 */
+	public function quarantine_list(): void {
+		$rows = array();
+		foreach ( $this->plugin->quarantine()->all() as $key => $item ) {
+			$rows[] = array( 'key' => $key, 'kind' => $item['kind'] ?? 'quarantine', 'file' => $item['file'], 'size' => $item['size'], 'date' => gmdate( 'Y-m-d H:i', (int) $item['time'] ) );
+		}
+		\WP_CLI\Utils\format_items( 'table', $rows, array( 'key', 'kind', 'file', 'size', 'date' ) );
+	}
+
+	/**
+	 * Undo every change recorded in a restore point.
+	 *
+	 * ## OPTIONS
+	 *
+	 * [<point>]
+	 * : Restore point ID. Omit to list restore points.
+	 *
+	 * @when after_wp_load
+	 */
+	public function rollback( array $args ): void {
+		$remediation = $this->plugin->remediation();
+		if ( ! $args ) {
+			$rows = array();
+			foreach ( $remediation->points() as $id => $point ) {
+				$rows[] = array( 'id' => $id, 'label' => $point['label'], 'items' => count( $point['items'] ), 'date' => gmdate( 'Y-m-d H:i', (int) $point['time'] ) );
+			}
+			\WP_CLI\Utils\format_items( 'table', $rows, array( 'id', 'label', 'items', 'date' ) );
+			return;
+		}
+		$result = $remediation->rollback( (string) $args[0] );
+		foreach ( $result['failed'] as $failure ) {
+			\WP_CLI::warning( $failure );
+		}
+		\WP_CLI::success( sprintf( '%d files restored.', $result['restored'] ) );
+	}
+
+	/**
+	 * Accept a finding as legitimate (updates baselines/snapshots where relevant, otherwise ignores it).
+	 *
+	 * ## OPTIONS
+	 *
+	 * <id>
+	 * : Finding ID.
+	 *
+	 * @when after_wp_load
+	 */
+	public function accept( array $args ): void {
+		$result = $this->plugin->remediation()->accept( (int) $args[0] );
+		if ( is_wp_error( $result ) ) {
+			\WP_CLI::error( $result->get_error_message() );
+		}
+		\WP_CLI::success( 'Accepted.' );
 	}
 
 	/**
