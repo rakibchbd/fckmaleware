@@ -4,26 +4,35 @@ Nothing here requires GitHub Actions. The workflows in `.github/workflows/` run 
 
 ## Plugin release
 
-1. Set the version in `fckmaleware.php`, in **both** the `Version:` header and `FCKMW_VERSION`. Add a section to `CHANGELOG.md`.
-2. Build:
+Installed sites update straight from the `main` branch. Raising the version and pushing to `main` publishes the update. No GitHub release and no Actions run are needed.
+
+1. Make the changes, then raise the version in `fckmaleware.php`, in **both** the `Version:` header and `FCKMW_VERSION` (for example `1.0.0` to `1.0.1`). Add a section to `CHANGELOG.md`.
+2. Check locally:
 
    ```sh
    tools/build-release.sh
    ```
 
-   This:
-   - checks that the two version strings match;
-   - lints every PHP file;
-   - checks that `signatures/signatures.json` matches its sources;
-   - runs `tests/run.php`;
-   - copies the files not excluded by `.distignore` into `build/fckmaleware/`;
-   - writes `checksums.json` (the SHA-256 of every shipped file, used by the plugin's self-integrity check);
-   - zips the result to `build/fckmaleware.zip` and writes `build/SHA256SUMS`.
-3. Install the zip on a test site and run a Standard scan. FCK Malware's own files must verify, with no findings in `wp-content/plugins/fckmaleware/`.
-4. Publish:
-   - With an authenticated `gh` CLI, run `tools/build-release.sh --publish`.
-   - Without it, create release `v<version>` on GitHub by hand and attach `fckmaleware.zip` and `SHA256SUMS`.
-5. Merge to `main`. Sites see the update within 6 hours, or straight away after *Dashboard → Updates → Check again*. Drafts and pre-releases are never offered.
+   This runs the same checks a release needs:
+   - the two version strings match;
+   - every PHP file lints;
+   - the signature database matches its sources;
+   - the unit tests pass.
+
+   It also builds `build/fckmaleware.zip` for manual installs.
+3. Push to `main`.
+
+What happens on installed sites:
+
+- Within 6 hours, or straight away after *Dashboard → Updates → Check again*, each site reads the `Version:` header of `fckmaleware.php` on `main`. If it is higher than the installed version, the update appears on Dashboard → Updates and the Plugins screen.
+- Auto-update is switched on for FCK Malware by default, so WordPress installs the update on its next background update run, normally within 12 hours. Administrators can turn auto-update off on the Plugins screen; their choice is kept.
+- The package is GitHub's archive of `main`. `.gitattributes` keeps development files out of it: `tests/`, `tools/`, `intel/`, `feed/`, `signatures/src/`, `.github/` and the internal docs.
+
+**Only push a version bump to `main` when the code on `main` is ready to ship.** Every site with auto-update on installs it. Work on a branch and merge when it is done.
+
+GitHub releases are optional and still supported. If a release with a higher version than `main` exists, sites take the release, preferring its `fckmaleware.zip` asset. Use `tools/build-release.sh --publish` or create one by hand.
+
+Packages installed from the `main` archive have no `checksums.json`. The plugin then covers its own files with a local baseline, like other plugins that are not on wordpress.org. The release zip from `tools/build-release.sh` includes `checksums.json` for a stronger self-check.
 
 ## Signature release
 

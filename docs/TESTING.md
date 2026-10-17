@@ -20,7 +20,7 @@ Environment: PHP 8.3.6 and WordPress 7.1.3 on SQLite (single site), with Chromiu
 |---|---|
 | Unit | **918 checks passed.** Signature validation and ReDoS probes, heuristics, 28 malware and 10 clean fixtures, Imunify JSON parsing, feed signing and verification, notifier, redactor. |
 | Signature database | Up to date: 45 signatures, v2026.10.17.4. |
-| WordPress integration | **33 of 33 passed.** Scan, detection, no duplicate findings, quarantine and byte-identical restore, restore points, refusals, accept-until-changed, scope confinement, database scan, persistence, settings validation, health arithmetic, hardening toggles, webhook SSRF guard, failed signature update keeping the active database. |
+| WordPress integration | **39 of 39 passed.** Plugin updater (version from main, release precedence, GitHub offline, auto-update default). Scan, detection, no duplicate findings, quarantine and byte-identical restore, restore points, refusals, accept-until-changed, scope confinement, database scan, persistence, settings validation, health arithmetic, hardening toggles, webhook SSRF guard, failed signature update keeping the active database. |
 | End-to-end UI | **20 of 20 passed, no JavaScript errors.** Login; overview; 14-section navigation; custom scan through AJAX to completion; findings list; quarantine from the UI; restore from the Quarantine screen; settings round-trip, including unticked checkboxes; hardening toggle; every remaining section renders. |
 | Admin pages with `WP_DEBUG` on | All 14 sections load with no PHP errors, warnings or notices. |
 | PHP compatibility | PHPCompatibility 10.0.0-alpha2, `testVersion 7.4-`: 0 issues. Deprecated-in-8.4/8.5 calls (`fputcsv` default escape, `curl_close`) fixed. |

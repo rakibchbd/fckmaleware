@@ -24,7 +24,8 @@ These connections are made automatically:
 | `downloads.wordpress.org` | Plugin integrity checks | Plugin slug and version |
 | `core.svn.wordpress.org`, `plugins.svn.wordpress.org` | Only when an admin chooses "Replace with official copy" | The file path inside core or the plugin |
 | `raw.githubusercontent.com` (or a configured feed) | Signature update checks, twice daily | A standard HTTP request; no site data |
-| `api.github.com` | Plugin update checks, at most every 6 hours | User-Agent with the plugin version and site URL (as WordPress does for its own update checks) |
+| `raw.githubusercontent.com`, `api.github.com` | Plugin update checks, at most every 6 hours | User-Agent with the plugin version and site URL (as WordPress does for its own update checks) |
+| `github.com` | Installing an update | A download of the update package |
 
 These connections are made only when an administrator sets them up:
 

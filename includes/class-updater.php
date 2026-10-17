@@ -1,11 +1,18 @@
 <?php
 /**
- * Delivers plugin updates from GitHub releases through the normal WordPress
- * update screens (Dashboard → Updates, Plugins list, auto-updates).
+ * Delivers plugin updates from GitHub through the normal WordPress update
+ * screens (Dashboard → Updates, Plugins list, auto-updates).
  *
- * The release workflow attaches fckmaleware.zip to every release; the
- * GitHub source zipball is used as a fallback, with its top-level folder
- * renamed so the plugin keeps its directory.
+ * Two sources are checked and the higher version wins:
+ *  - the main branch: the Version header of fckmaleware.php on main, with
+ *    GitHub's archive of main as the package (development files are left
+ *    out of it by .gitattributes export-ignore). Pushing a version bump to
+ *    main is therefore enough to publish an update; no release or GitHub
+ *    Actions run is needed.
+ *  - the latest GitHub release, if any (its fckmaleware.zip asset, or the
+ *    source zipball).
+ * Either archive's top-level folder is renamed so the plugin keeps its
+ * directory.
  *
  * @package Fckmaleware
  */
@@ -15,6 +22,7 @@ namespace Fckmaleware;
 final class Updater {
 
 	public const REPOSITORY = 'rakibchbd/fckmaleware';
+	public const BRANCH     = 'main';
 	private const CACHE     = 'fckmw_github_release';
 	private const ASSET     = 'fckmaleware.zip';
 
@@ -49,7 +57,8 @@ final class Updater {
 	}
 
 	/**
-	 * Latest published release, cached for 6 hours (1 hour after a failure).
+	 * Newest available version from the main branch or the latest release,
+	 * cached for 6 hours (1 hour after a failure).
 	 *
 	 * @return array{version: string, package: string, url: string, notes: string, published: string}|null
 	 */
@@ -59,40 +68,76 @@ final class Updater {
 			return $cached['release'];
 		}
 
-		$release  = null;
-		$response = wp_remote_get(
-			'https://api.github.com/repos/' . self::REPOSITORY . '/releases/latest',
-			array(
-				'timeout' => 10,
-				'headers' => array(
-					'Accept'     => 'application/vnd.github+json',
-					'User-Agent' => 'FckMaleware/' . FCKMW_VERSION . '; ' . home_url(),
-				),
-			)
-		);
-
-		if ( 200 === wp_remote_retrieve_response_code( $response ) ) {
-			$data    = json_decode( wp_remote_retrieve_body( $response ), true );
-			$version = is_array( $data ) ? ltrim( (string) ( $data['tag_name'] ?? '' ), 'vV' ) : '';
-			if ( preg_match( '/^\d+(\.\d+){1,3}$/', $version ) ) {
-				$package = (string) ( $data['zipball_url'] ?? '' );
-				foreach ( (array) ( $data['assets'] ?? array() ) as $asset ) {
-					if ( self::ASSET === ( $asset['name'] ?? '' ) ) {
-						$package = (string) $asset['browser_download_url'];
-					}
-				}
-				$release = array(
-					'version'   => $version,
-					'package'   => $package,
-					'url'       => (string) ( $data['html_url'] ?? 'https://github.com/' . self::REPOSITORY ),
-					'notes'     => (string) ( $data['body'] ?? '' ),
-					'published' => (string) ( $data['published_at'] ?? '' ),
-				);
+		$release = null;
+		foreach ( array( $this->from_branch(), $this->from_release() ) as $candidate ) {
+			if ( $candidate && ( ! $release || version_compare( $candidate['version'], $release['version'], '>' ) ) ) {
+				$release = $candidate;
 			}
 		}
 
 		set_site_transient( self::CACHE, array( 'release' => $release ), $release ? 6 * HOUR_IN_SECONDS : HOUR_IN_SECONDS );
 		return $release;
+	}
+
+	private static function request_args(): array {
+		return array(
+			'timeout' => 10,
+			'headers' => array(
+				'Accept'     => 'application/vnd.github+json',
+				'User-Agent' => 'FckMaleware/' . FCKMW_VERSION . '; ' . home_url(),
+			),
+		);
+	}
+
+	private static function valid_version( string $version ): bool {
+		return (bool) preg_match( '/^\d+(\.\d+){1,3}$/', $version );
+	}
+
+	/** Version on the main branch, read from the plugin header (raw file, no API rate limit). */
+	private function from_branch(): ?array {
+		$response = wp_remote_get(
+			'https://raw.githubusercontent.com/' . self::REPOSITORY . '/' . self::BRANCH . '/fckmaleware.php',
+			array( 'limit_response_size' => 65536 ) + self::request_args()
+		);
+		if ( 200 !== wp_remote_retrieve_response_code( $response ) ) {
+			return null;
+		}
+		if ( ! preg_match( '/^[ \t\/*#@]*Version:\s*(\S+)/mi', (string) wp_remote_retrieve_body( $response ), $m ) || ! self::valid_version( $m[1] ) ) {
+			return null;
+		}
+		return array(
+			'version'   => $m[1],
+			'package'   => 'https://github.com/' . self::REPOSITORY . '/archive/refs/heads/' . self::BRANCH . '.zip',
+			'url'       => 'https://github.com/' . self::REPOSITORY . '/blob/' . self::BRANCH . '/CHANGELOG.md',
+			'notes'     => '',
+			'published' => '',
+		);
+	}
+
+	/** Latest published GitHub release, if the project publishes them. */
+	private function from_release(): ?array {
+		$response = wp_remote_get( 'https://api.github.com/repos/' . self::REPOSITORY . '/releases/latest', self::request_args() );
+		if ( 200 !== wp_remote_retrieve_response_code( $response ) ) {
+			return null;
+		}
+		$data    = json_decode( wp_remote_retrieve_body( $response ), true );
+		$version = is_array( $data ) ? ltrim( (string) ( $data['tag_name'] ?? '' ), 'vV' ) : '';
+		if ( ! self::valid_version( $version ) ) {
+			return null;
+		}
+		$package = (string) ( $data['zipball_url'] ?? '' );
+		foreach ( (array) ( $data['assets'] ?? array() ) as $asset ) {
+			if ( self::ASSET === ( $asset['name'] ?? '' ) ) {
+				$package = (string) $asset['browser_download_url'];
+			}
+		}
+		return array(
+			'version'   => $version,
+			'package'   => $package,
+			'url'       => (string) ( $data['html_url'] ?? 'https://github.com/' . self::REPOSITORY ),
+			'notes'     => (string) ( $data['body'] ?? '' ),
+			'published' => (string) ( $data['published_at'] ?? '' ),
+		);
 	}
 
 	/**
@@ -103,6 +148,7 @@ final class Updater {
 		if ( ! is_object( $transient ) ) {
 			return $transient;
 		}
+		Plugin::enable_auto_updates(); // Covers installs that predate the default.
 		$release = $this->latest_release();
 		if ( ! $release || '' === $release['package'] ) {
 			return $transient;
@@ -145,7 +191,7 @@ final class Updater {
 			return $result;
 		}
 		return (object) array(
-			'name'          => 'FckMaleware',
+			'name'          => 'FCK Malware',
 			'slug'          => $this->slug,
 			'version'       => $release['version'],
 			'author'        => '<a href="https://github.com/' . esc_attr( self::REPOSITORY ) . '">FckMaleware</a>',
@@ -155,8 +201,8 @@ final class Updater {
 			'requires_php'  => '7.4',
 			'last_updated'  => $release['published'],
 			'sections'      => array(
-				'description' => esc_html__( 'Malware protection for WordPress: built-in signature scanning, core integrity checks, quarantine and Imunify360 integration.', 'fckmaleware' ),
-				'changelog'   => '' !== $release['notes'] ? wpautop( esc_html( $release['notes'] ) ) : esc_html__( 'See the release on GitHub.', 'fckmaleware' ),
+				'description' => esc_html__( 'Free, open-source malware protection for WordPress: signature, heuristic, integrity and behaviour detection, database scanning, safe remediation and signed signature updates.', 'fckmaleware' ),
+				'changelog'   => '' !== $release['notes'] ? wpautop( esc_html( $release['notes'] ) ) : '<p><a href="' . esc_url( $release['url'] ) . '" target="_blank" rel="noopener noreferrer">' . esc_html__( 'See the changelog on GitHub.', 'fckmaleware' ) . '</a></p>',
 			),
 		);
 	}

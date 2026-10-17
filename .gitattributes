@@ -1,0 +1,14 @@
+# Left out of GitHub's archive of the branch, which installed sites download
+# as their update package (see includes/class-updater.php).
+/.github        export-ignore
+/.gitattributes export-ignore
+/.gitignore     export-ignore
+/.distignore    export-ignore
+/build          export-ignore
+/docs/AUDIT.md  export-ignore
+/docs/ROADMAP.md export-ignore
+/feed           export-ignore
+/intel          export-ignore
+/signatures/src export-ignore
+/tests          export-ignore
+/tools          export-ignore

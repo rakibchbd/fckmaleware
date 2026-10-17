@@ -34,7 +34,7 @@ Requires WordPress 5.8+ and PHP 7.4+. Works on single sites and multisite networ
 2. Upload it in **Plugins → Add New → Upload Plugin**, then activate it (network-activate on multisite).
 3. Open **FCK Malware → Malware Scanner** and run a **Standard** scan. It records integrity baselines for plugins and themes that are not on wordpress.org.
 
-Later versions appear in **Dashboard → Updates** like any other plugin.
+Updates come from this GitHub repository. When a higher version is pushed to `main`, sites see it in **Dashboard → Updates** within 6 hours and install it automatically: auto-update is on by default, and can be turned off on the Plugins screen. See [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Scan modes
 

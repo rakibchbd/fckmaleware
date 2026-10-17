@@ -170,6 +170,55 @@ try {
 	remove_filter( 'fckmw_signature_feed_url', $filter );
 	$check( 'error' === $update['status'], 'unreachable or unsafe feed URL reports an error' );
 	$check( $active === $plugin->signature_updater()->load()->version(), 'failed update keeps the active database' );
+
+	// --- Plugin updater (GitHub responses faked) --------------------------------
+	$fake = static function ( array $responses ) {
+		return static function ( $pre, $args, $url ) use ( $responses ) {
+			foreach ( $responses as $needle => $response ) {
+				if ( false !== strpos( $url, $needle ) ) {
+					return is_array( $response ) ? $response + array( 'headers' => array(), 'cookies' => array() ) : $response;
+				}
+			}
+			return $pre;
+		};
+	};
+	$updater = new \Fckmaleware\Updater();
+	$header  = "<?php\n/**\n * Plugin Name: FCK Malware\n * Version:           9.1.0\n */\n";
+	$filter  = $fake(
+		array(
+			'raw.githubusercontent.com' => array( 'response' => array( 'code' => 200 ), 'body' => $header ),
+			'api.github.com'            => array( 'response' => array( 'code' => 404 ), 'body' => '{}' ),
+		)
+	);
+	add_filter( 'pre_http_request', $filter, 10, 3 );
+	$updater->flush();
+	$latest = $updater->latest_release();
+	$check( '9.1.0' === ( $latest['version'] ?? '' ), 'updater reads the version from main when no release exists' );
+	$check( false !== strpos( (string) ( $latest['package'] ?? '' ), '/archive/refs/heads/main.zip' ), 'package is the archive of main' );
+	$transient = $updater->inject_update( (object) array( 'response' => array(), 'no_update' => array() ) );
+	$check( isset( $transient->response[ plugin_basename( FCKMW_FILE ) ] ), 'higher version on main is offered as an update' );
+	$check( in_array( plugin_basename( FCKMW_FILE ), (array) get_site_option( 'auto_update_plugins', array() ), true ), 'auto-update is enabled for the plugin' );
+	remove_filter( 'pre_http_request', $filter, 10 );
+
+	$filter = $fake(
+		array(
+			'raw.githubusercontent.com' => array( 'response' => array( 'code' => 200 ), 'body' => $header ),
+			'api.github.com'            => array( 'response' => array( 'code' => 200 ), 'body' => wp_json_encode( array( 'tag_name' => 'v9.2.0', 'zipball_url' => 'https://example.invalid/z', 'assets' => array( array( 'name' => 'fckmaleware.zip', 'browser_download_url' => 'https://example.invalid/fckmaleware.zip' ) ) ) ) ),
+		)
+	);
+	add_filter( 'pre_http_request', $filter, 10, 3 );
+	$updater->flush();
+	$latest = $updater->latest_release();
+	$check( '9.2.0' === $latest['version'] && 'https://example.invalid/fckmaleware.zip' === $latest['package'], 'a newer release wins over main and uses its zip asset' );
+	remove_filter( 'pre_http_request', $filter, 10 );
+
+	$filter = $fake( array( 'github' => new WP_Error( 'down', 'offline' ) ) );
+	add_filter( 'pre_http_request', $filter, 10, 3 );
+	$updater->flush();
+	$transient = $updater->inject_update( (object) array( 'response' => array(), 'no_update' => array() ) );
+	$check( null === $updater->latest_release() && empty( $transient->response ), 'GitHub unreachable: no update offered, no error' );
+	remove_filter( 'pre_http_request', $filter, 10 );
+	$updater->flush();
 } finally {
 	foreach ( (array) glob( "{$dir}/*" ) as $file ) {
 		wp_delete_file( $file );

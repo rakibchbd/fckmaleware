@@ -395,10 +395,29 @@ final class Plugin {
 		}
 		Paths::ensure_data_dir();
 		self::reschedule();
+		self::enable_auto_updates();
 
 		if ( '' !== $previous && Schema::VERSION !== $previous ) {
 			ActivityLog::log( 'plugin.upgrade', sprintf( /* translators: 1: old schema, 2: new schema */ __( 'Data upgraded from schema %1$s to %2$s.', 'fckmaleware' ), $previous, Schema::VERSION ) );
 		}
+	}
+
+	/**
+	 * Security fixes should reach sites without waiting for someone to click,
+	 * so WordPress's auto-update is switched on for this plugin once. An
+	 * administrator who later disables it on the Plugins screen stays opted out.
+	 */
+	public static function enable_auto_updates(): void {
+		if ( Store::get( 'fckmw_auto_update_default', false ) ) {
+			return;
+		}
+		$basename = plugin_basename( FCKMW_FILE );
+		$enabled  = (array) get_site_option( 'auto_update_plugins', array() );
+		if ( ! in_array( $basename, $enabled, true ) ) {
+			$enabled[] = $basename;
+			update_site_option( 'auto_update_plugins', $enabled );
+		}
+		Store::set( 'fckmw_auto_update_default', time() );
 	}
 
 	public static function activate(): void {

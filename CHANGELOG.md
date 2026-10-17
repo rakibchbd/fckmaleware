@@ -58,6 +58,7 @@ A rewrite of 0.2.0 into a layered protection system. Data from 0.x is migrated a
 - A visible error if the database upgrade fails.
 
 ### Other
+- Plugin updates come straight from the `main` branch on GitHub: a version bump pushed to `main` is offered to every site. No release or Actions run is needed, and GitHub releases are still honoured if newer. Auto-update is on by default and can be turned off by administrators.
 - WP-CLI commands for everything above.
 - `uninstall.php` removes all v3 data.
 - Release builds no longer need GitHub Actions (`tools/build-release.sh`).
