@@ -1,7 +1,13 @@
 <?php
 /**
- * Admin router: menu, assets and dispatch to the section pages. State-changing
- * requests are handled by Admin\Actions.
+ * Admin router: one top-level menu with five sections, each holding
+ * contextual tabs, plus assets and dispatch to the tab pages.
+ * State-changing requests are handled by Admin\Actions.
+ *
+ * Before 1.1 every screen was its own submenu (fckmaleware-findings,
+ * fckmaleware-activity, ...). Those slugs are no longer registered; requests
+ * for them are redirected to the matching tab so bookmarks and e-mailed links
+ * keep working.
  *
  * @package Fckmaleware
  */
@@ -21,31 +27,76 @@ final class Admin {
 		$this->plugin = $plugin;
 	}
 
-	/** slug => [menu title, page class]. '' is the top-level Security Overview. */
-	public static function pages(): array {
+	/**
+	 * section slug => [menu title, [tab key => [tab title, page class]]].
+	 * '' is the top-level Overview. Tab keys are the pre-1.1 page slugs, so
+	 * Ui::url( 'findings' ) and similar calls resolve to the right tab.
+	 */
+	public static function sections(): array {
 		return array(
-			''             => array( __( 'Security Overview', 'fckmaleware' ), Pages\Overview::class ),
-			'scanner'      => array( __( 'Malware Scanner', 'fckmaleware' ), Pages\Scanner::class ),
-			'findings'     => array( __( 'Threat Findings', 'fckmaleware' ), Pages\Findings::class ),
-			'quarantine'   => array( __( 'Quarantine', 'fckmaleware' ), Pages\Quarantine::class ),
-			'realtime'     => array( __( 'Real-Time Protection', 'fckmaleware' ), Pages\Realtime::class ),
-			'hardening'    => array( __( 'Security Hardening', 'fckmaleware' ), Pages\Hardening::class ),
-			'ai'           => array( __( 'AI Intelligence', 'fckmaleware' ), Pages\Intelligence::class ),
-			'signatures'   => array( __( 'Signature Database', 'fckmaleware' ), Pages\SignatureDatabase::class ),
-			'intel'        => array( __( 'Threat Intelligence', 'fckmaleware' ), Pages\ThreatIntel::class ),
-			'schedule'     => array( __( 'Scan Schedule', 'fckmaleware' ), Pages\Schedule::class ),
-			'reports'      => array( __( 'Reports', 'fckmaleware' ), Pages\Reports::class ),
-			'activity'     => array( __( 'Activity Log', 'fckmaleware' ), Pages\Activity::class ),
-			'integrations' => array( __( 'Integrations', 'fckmaleware' ), Pages\Integrations::class ),
-			'settings'     => array( __( 'Settings', 'fckmaleware' ), Pages\SettingsPage::class ),
+			''             => array(
+				__( 'Overview', 'fckmaleware' ),
+				array( '' => array( __( 'Security Overview', 'fckmaleware' ), Pages\Overview::class ) ),
+			),
+			'scan'         => array(
+				__( 'Scan & Threats', 'fckmaleware' ),
+				array(
+					'scanner'    => array( __( 'Scanner', 'fckmaleware' ), Pages\Scanner::class ),
+					'findings'   => array( __( 'Threat Findings', 'fckmaleware' ), Pages\Findings::class ),
+					'quarantine' => array( __( 'Quarantine', 'fckmaleware' ), Pages\Quarantine::class ),
+					'schedule'   => array( __( 'Schedule', 'fckmaleware' ), Pages\Schedule::class ),
+				),
+			),
+			'protection'   => array(
+				__( 'Protection', 'fckmaleware' ),
+				array(
+					'realtime'   => array( __( 'Real-Time Protection', 'fckmaleware' ), Pages\Realtime::class ),
+					'hardening'  => array( __( 'Hardening', 'fckmaleware' ), Pages\Hardening::class ),
+					'signatures' => array( __( 'Signatures', 'fckmaleware' ), Pages\SignatureDatabase::class ),
+					'intel'      => array( __( 'Threat Intelligence', 'fckmaleware' ), Pages\ThreatIntel::class ),
+					'ai'         => array( __( 'AI Intelligence', 'fckmaleware' ), Pages\Intelligence::class ),
+				),
+			),
+			'integrations' => array(
+				__( 'Integrations', 'fckmaleware' ),
+				array(
+					'integrations' => array( __( 'Server Security', 'fckmaleware' ), Pages\Integrations::class ),
+					'connections'  => array( __( 'Webhooks & Updates', 'fckmaleware' ), Pages\Connections::class ),
+				),
+			),
+			'settings'     => array(
+				__( 'Settings & Logs', 'fckmaleware' ),
+				array(
+					'settings'    => array( __( 'Settings', 'fckmaleware' ), Pages\SettingsPage::class ),
+					'activity'    => array( __( 'Activity Log', 'fckmaleware' ), Pages\Activity::class ),
+					'reports'     => array( __( 'Reports', 'fckmaleware' ), Pages\Reports::class ),
+					'diagnostics' => array( __( 'Diagnostics', 'fckmaleware' ), Pages\Diagnostics::class ),
+				),
+			),
 		);
+	}
+
+	/** @return array{0: string, 1: string}|null [section, tab] for a tab key or section slug. */
+	public static function locate( string $key ): ?array {
+		$sections = self::sections();
+		if ( isset( $sections[ $key ] ) ) {
+			return array( $key, (string) array_key_first( $sections[ $key ][1] ) );
+		}
+		foreach ( $sections as $section => $entry ) {
+			if ( isset( $entry[1][ $key ] ) ) {
+				return array( (string) $section, $key );
+			}
+		}
+		return null;
 	}
 
 	public function register(): void {
 		add_action( is_multisite() ? 'network_admin_menu' : 'admin_menu', array( $this, 'menu' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'assets' ) );
+		add_action( 'admin_page_access_denied', array( $this, 'redirect_legacy' ) );
 		add_filter( is_multisite() ? 'network_admin_plugin_action_links_' . plugin_basename( FCKMW_FILE ) : 'plugin_action_links_' . plugin_basename( FCKMW_FILE ), array( $this, 'action_links' ) );
 		add_action( is_multisite() ? 'network_admin_notices' : 'admin_notices', array( $this, 'schema_notice' ) );
+		add_filter( 'admin_body_class', array( $this, 'body_class' ) );
 		( new Actions( $this->plugin ) )->register();
 	}
 
@@ -66,23 +117,67 @@ final class Admin {
 	public function menu(): void {
 		$counts = $this->plugin->findings()->open_counts();
 		$badge  = $counts['total'] ? sprintf( ' <span class="awaiting-mod">%d</span>', $counts['total'] ) : '';
-		add_menu_page( __( 'FCK Malware', 'fckmaleware' ), __( 'FCK Malware', 'fckmaleware' ) . $badge, Plugin::capability(), Ui::SLUG, array( $this, 'render' ), 'dashicons-shield', 80 );
-		foreach ( self::pages() as $slug => $page ) {
-			add_submenu_page( Ui::SLUG, $page[0], $page[0], Plugin::capability(), '' === $slug ? Ui::SLUG : Ui::SLUG . '-' . $slug, array( $this, 'render' ) );
+		add_menu_page( Ui::brand_name(), Ui::brand_name() . $badge, Plugin::capability(), Ui::SLUG, array( $this, 'render' ), 'dashicons-shield', 80 );
+		foreach ( self::sections() as $slug => $section ) {
+			add_submenu_page(
+				Ui::SLUG,
+				$section[0],
+				$section[0] . ( 'scan' === $slug ? $badge : '' ),
+				Plugin::capability(),
+				'' === $slug ? Ui::SLUG : Ui::SLUG . '-' . $slug,
+				array( $this, 'render' )
+			);
 		}
 	}
 
-	/** Slug of the current FCK Malware screen, or null on other screens. */
-	private static function current(): ?string {
+	/**
+	 * Old per-screen slugs are no longer registered, so WordPress denies them
+	 * before any page code runs. Send authorised users to the new location,
+	 * keeping filters such as ?status=open.
+	 */
+	public function redirect_legacy(): void {
 		$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification -- navigation only.
-		if ( Ui::SLUG === $page ) {
-			return '';
-		}
 		$prefix = Ui::SLUG . '-';
-		if ( 0 === strpos( $page, $prefix ) && isset( self::pages()[ substr( $page, strlen( $prefix ) ) ] ) ) {
-			return substr( $page, strlen( $prefix ) );
+		if ( 0 !== strpos( $page, $prefix ) || ! Ui::can() ) {
+			return;
 		}
-		return null;
+		$key = substr( $page, strlen( $prefix ) );
+		if ( null === self::locate( $key ) ) {
+			return;
+		}
+		$args = array();
+		foreach ( wp_unslash( $_GET ) as $name => $value ) { // phpcs:ignore WordPress.Security.NonceVerification, WordPress.Security.ValidatedSanitizedInput -- re-encoded by add_query_arg and only used for a same-site redirect.
+			if ( 'page' !== $name && is_scalar( $value ) ) {
+				$args[ sanitize_key( $name ) ] = (string) $value;
+			}
+		}
+		wp_safe_redirect( Ui::url( $key, $args ) );
+		exit;
+	}
+
+	/** [section, tab] of the current FCK Malware screen, or null on other screens. */
+	public static function current(): ?array {
+		$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification -- navigation only.
+		$tab  = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification -- navigation only.
+		if ( Ui::SLUG === $page ) {
+			$section = '';
+		} elseif ( 0 === strpos( $page, Ui::SLUG . '-' ) ) {
+			$section = substr( $page, strlen( Ui::SLUG ) + 1 );
+		} else {
+			return null;
+		}
+		$sections = self::sections();
+		if ( ! isset( $sections[ $section ] ) ) {
+			return null;
+		}
+		if ( ! isset( $sections[ $section ][1][ $tab ] ) ) {
+			$tab = (string) array_key_first( $sections[ $section ][1] );
+		}
+		return array( $section, $tab );
+	}
+
+	public function body_class( $classes ): string {
+		return null === self::current() ? (string) $classes : $classes . ' fckmw-screen';
 	}
 
 	public function assets(): void {
@@ -95,20 +190,32 @@ final class Admin {
 			'fckmw-admin',
 			'fckmw',
 			array(
-				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-				'nonce'   => wp_create_nonce( 'fckmw_scan' ),
-				'scan'    => $this->plugin->scanner()->state()['status'] ?? 'idle',
-				'dbScan'  => $this->plugin->db_scanner()->state()['status'] ?? 'idle',
-				'i18n'    => array(
-					'starting'   => __( 'Preparing the file list…', 'fckmaleware' ),
+				'ajaxUrl'   => admin_url( 'admin-ajax.php' ),
+				'nonce'     => wp_create_nonce( 'fckmw_scan' ),
+				'bulkNonce' => wp_create_nonce( 'fckmw_bulk' ),
+				'scan'      => $this->plugin->scanner()->state()['status'] ?? 'idle',
+				'dbScan'    => $this->plugin->db_scanner()->state()['status'] ?? 'idle',
+				'bulkJob'   => BulkJob::current_status(),
+				'i18n'      => array(
+					'starting'     => __( 'Preparing the file list…', 'fckmaleware' ),
 					/* translators: 1: checked, 2: total, 3: detections */
-					'scanning'   => __( '%1$d of %2$d files checked, %3$d detections', 'fckmaleware' ),
+					'scanning'     => __( '%1$d of %2$d files checked, %3$d detections', 'fckmaleware' ),
 					/* translators: 1: rows, 2: detections */
-					'dbScanning' => __( '%1$d rows checked, %2$d detections', 'fckmaleware' ),
-					'done'       => __( 'Finished. Reloading…', 'fckmaleware' ),
-					'cancelled'  => __( 'Cancelled.', 'fckmaleware' ),
-					'error'      => __( 'Error:', 'fckmaleware' ),
-					'network'    => __( 'The request failed. Check your connection and try again; the scan resumes where it stopped.', 'fckmaleware' ),
+					'dbScanning'   => __( '%1$d rows checked, %2$d detections', 'fckmaleware' ),
+					'done'         => __( 'Finished. Reloading…', 'fckmaleware' ),
+					'cancelled'    => __( 'Cancelled.', 'fckmaleware' ),
+					'error'        => __( 'Error:', 'fckmaleware' ),
+					'network'      => __( 'The request failed. Check your connection and try again; the scan resumes where it stopped.', 'fckmaleware' ),
+					'confirm'      => __( 'Confirm', 'fckmaleware' ),
+					'cancel'       => __( 'Cancel', 'fckmaleware' ),
+					'close'        => __( 'Close', 'fckmaleware' ),
+					'areYouSure'   => __( 'Please confirm', 'fckmaleware' ),
+					'previewing'   => __( 'Counting affected findings…', 'fckmaleware' ),
+					/* translators: 1: processed, 2: total, 3: succeeded, 4: failed, 5: skipped */
+					'bulkProgress' => __( '%1$d of %2$d processed: %3$d succeeded, %4$d failed, %5$d skipped', 'fckmaleware' ),
+					'bulkDone'     => __( 'Bulk action finished.', 'fckmaleware' ),
+					'selectFirst'  => __( 'Choose an action and at least one finding first.', 'fckmaleware' ),
+					'elapsed'      => __( 'Elapsed', 'fckmaleware' ),
 				),
 			)
 		);
@@ -118,25 +225,41 @@ final class Admin {
 		if ( ! Ui::can() ) {
 			wp_die( esc_html__( 'You do not have permission to view this page.', 'fckmaleware' ), 403 );
 		}
-		$slug  = self::current() ?? '';
-		$entry = self::pages()[ $slug ];
+		list( $section, $tab ) = self::current() ?? array( '', '' );
+		$entry                 = self::sections()[ $section ][1][ $tab ];
+		Ui::set_route( $section, $tab );
+		Ui::set_brand( $this->brand() );
 		$class = $entry[1];
-		self::nav( $slug );
 		( new $class( $this->plugin ) )->render( $entry[0] );
 	}
 
-	/** Section navigation shown above every page (the admin menu holds the same links). */
-	private static function nav( string $current ): void {
-		echo '<nav class="fckmw-nav" aria-label="' . esc_attr__( 'FCK Malware sections', 'fckmaleware' ) . '"><ul>';
-		foreach ( self::pages() as $slug => $page ) {
-			printf(
-				'<li><a href="%1$s"%2$s>%3$s</a></li>',
-				esc_url( Ui::url( $slug ) ),
-				$slug === $current ? ' aria-current="page" class="is-current"' : '',
-				esc_html( $page[0] )
-			);
+	/**
+	 * Protection state for the brand bar. "Active" needs upload screening,
+	 * scheduled scans and a loaded signature database; anything less is
+	 * "limited" and links to the Protection screen.
+	 */
+	private function brand(): array {
+		$settings = Settings::all();
+		$sigs     = $this->plugin->signatures();
+		$missing  = array();
+		if ( ! $settings['realtime_uploads'] ) {
+			$missing[] = 'uploads';
 		}
-		echo '</ul></nav>';
+		if ( 'off' === $settings['schedule'] ) {
+			$missing[] = 'schedule';
+		}
+		if ( 0 === $sigs->count() ) {
+			$missing[] = 'signatures';
+		}
+		$last = ScanHistory::latest( null, true );
+		$next = wp_next_scheduled( Plugin::CRON_SCAN );
+		return array(
+			'label'      => $missing ? __( 'Protection limited', 'fckmaleware' ) : __( 'Protection active', 'fckmaleware' ),
+			'tone'       => $missing ? ( in_array( 'signatures', $missing, true ) ? 'bad' : 'warn' ) : 'good',
+			'last'       => $last ? (int) $last['finished'] : (int) ( ( (array) Store::get( 'fckmw_last_scan', array() ) )['finished'] ?? 0 ),
+			'next'       => $next ? (int) $next : 0,
+			'next_label' => 'off' === $settings['schedule'] ? __( 'scheduled scans are off', 'fckmaleware' ) : '',
+		);
 	}
 
 	public function action_links( array $links ): array {

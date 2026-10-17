@@ -171,32 +171,96 @@ final class Findings {
 		return $row ?: null;
 	}
 
-	/**
-	 * @param array{status?: string, source?: string, object_type?: string, severity?: string, search?: string} $filters
-	 * @return array{rows: array<int, array>, total: int}
-	 */
-	public function query( $filters = 'open', int $page = 1, int $per_page = 50 ): array {
-		global $wpdb;
-		$filters = is_array( $filters ) ? $filters : array( 'status' => (string) $filters );
-		$table   = self::table();
-		$where   = array( 'status = %s' );
-		$args    = array( in_array( $filters['status'] ?? 'open', self::STATUSES, true ) ? $filters['status'] : 'open' );
+	/** File-type filter values => LIKE suffixes on the path. */
+	public const FILE_TYPES = array(
+		'php'      => array( '.php', '.phtml', '.phar', '.php5', '.php7', '.inc' ),
+		'js'       => array( '.js', '.mjs' ),
+		'config'   => array( '.htaccess', '.user.ini', '.ini', 'web.config' ),
+		'html'     => array( '.html', '.htm', '.svg' ),
+		'image'    => array( '.jpg', '.jpeg', '.png', '.gif', '.ico', '.webp', '.bmp' ),
+	);
 
-		foreach ( array( 'source', 'object_type', 'severity' ) as $column ) {
+	/** Confidence bands for filtering. */
+	public const CONFIDENCE_BANDS = array(
+		'high'   => array( 90, 100 ),
+		'medium' => array( 70, 89 ),
+		'low'    => array( 0, 69 ),
+	);
+
+	/**
+	 * How certain a finding is: "confirmed" (exact known-malware signature or
+	 * server scanner match at 90%+), "likely" (other malicious verdicts),
+	 * "change" (integrity differences that are not proof of malware) or
+	 * "suspicious".
+	 */
+	public static function classify( array $row ): string {
+		$verdict    = (string) ( $row['verdict'] ?? '' );
+		$source     = (string) ( $row['source'] ?? '' );
+		$confidence = (int) ( $row['confidence'] ?? 0 );
+		if ( 'malicious' === $verdict && $confidence >= 90 && in_array( $source, array( 'signature', 'imunify' ), true ) ) {
+			return 'confirmed';
+		}
+		if ( 'malicious' === $verdict ) {
+			return 'likely';
+		}
+		return 'integrity' === $source ? 'change' : 'suspicious';
+	}
+
+	/**
+	 * WHERE clause for the filters shared by the list, counts and bulk jobs.
+	 *
+	 * @return array{0: string, 1: array}
+	 */
+	private static function where( array $filters ): array {
+		global $wpdb;
+		$where = array( 'status = %s' );
+		$args  = array( in_array( $filters['status'] ?? 'open', self::STATUSES, true ) ? $filters['status'] : 'open' );
+
+		foreach ( array( 'source', 'object_type', 'severity', 'verdict' ) as $column ) {
 			if ( ! empty( $filters[ $column ] ) ) {
 				$where[] = "{$column} = %s";
 				$args[]  = (string) $filters[ $column ];
 			}
+		}
+		if ( ! empty( $filters['confidence'] ) && isset( self::CONFIDENCE_BANDS[ $filters['confidence'] ] ) ) {
+			$where[] = 'confidence BETWEEN %d AND %d';
+			array_push( $args, self::CONFIDENCE_BANDS[ $filters['confidence'] ][0], self::CONFIDENCE_BANDS[ $filters['confidence'] ][1] );
+		}
+		if ( ! empty( $filters['min_confidence'] ) ) {
+			$where[] = 'confidence >= %d';
+			$args[]  = (int) $filters['min_confidence'];
+		}
+		if ( ! empty( $filters['file_type'] ) && isset( self::FILE_TYPES[ $filters['file_type'] ] ) ) {
+			$likes = array();
+			foreach ( self::FILE_TYPES[ $filters['file_type'] ] as $suffix ) {
+				$likes[] = 'file LIKE %s';
+				$args[]  = '%' . $wpdb->esc_like( $suffix );
+			}
+			$where[] = "object_type = 'file' AND (" . implode( ' OR ', $likes ) . ')';
+		}
+		if ( ! empty( $filters['since_days'] ) ) {
+			$where[] = 'detected_at >= %s';
+			$args[]  = gmdate( 'Y-m-d H:i:s', time() - (int) $filters['since_days'] * DAY_IN_SECONDS );
 		}
 		if ( ! empty( $filters['search'] ) ) {
 			$like    = '%' . $wpdb->esc_like( (string) $filters['search'] ) . '%';
 			$where[] = '(file LIKE %s OR signature_name LIKE %s OR signature_id LIKE %s)';
 			array_push( $args, $like, $like, $like );
 		}
+		return array( implode( ' AND ', $where ), $args );
+	}
 
-		$where_sql = implode( ' AND ', $where );
-		$per_page  = max( 1, $per_page );
-		$offset    = max( 0, $page - 1 ) * $per_page;
+	/**
+	 * @param array{status?: string, source?: string, object_type?: string, severity?: string, verdict?: string, confidence?: string, file_type?: string, since_days?: int, search?: string} $filters
+	 * @return array{rows: array<int, array>, total: int}
+	 */
+	public function query( $filters = 'open', int $page = 1, int $per_page = 50 ): array {
+		global $wpdb;
+		$filters                  = is_array( $filters ) ? $filters : array( 'status' => (string) $filters );
+		$table                    = self::table();
+		list( $where_sql, $args ) = self::where( $filters );
+		$per_page                 = max( 1, $per_page );
+		$offset                   = max( 0, $page - 1 ) * $per_page;
 
 		// phpcs:disable WordPress.DB
 		$total = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE {$where_sql}", $args ) );
@@ -214,6 +278,54 @@ final class Findings {
 		return array( 'rows' => $rows ?: array(), 'total' => $total );
 	}
 
+	public function count( array $filters ): int {
+		global $wpdb;
+		$table                    = self::table();
+		list( $where_sql, $args ) = self::where( $filters );
+		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE {$where_sql}", $args ) ); // phpcs:ignore WordPress.DB
+	}
+
+	/**
+	 * Next page of matching rows in id order, for bulk jobs that walk large
+	 * result sets in bounded batches without holding them in memory.
+	 *
+	 * @return array<int, array>
+	 */
+	public function batch_after( array $filters, int $after_id, int $limit ): array {
+		global $wpdb;
+		$table                    = self::table();
+		list( $where_sql, $args ) = self::where( $filters );
+		$args                     = array_merge( $args, array( $after_id, max( 1, $limit ) ) );
+		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$table} WHERE {$where_sql} AND id > %d ORDER BY id ASC LIMIT %d", $args ), ARRAY_A ); // phpcs:ignore WordPress.DB
+	}
+
+	/**
+	 * Findings detected since $since, bucketed for the "top threats" chart:
+	 * malware, suspicious, heuristic, false positive (accepted) and other
+	 * (integrity, behaviour, database).
+	 *
+	 * @return array<string, int>
+	 */
+	public function breakdown_since( int $since ): array {
+		global $wpdb;
+		$table = self::table();
+		$out   = array( 'malware' => 0, 'suspicious' => 0, 'heuristic' => 0, 'false_positive' => 0, 'other' => 0 );
+		$rows  = $wpdb->get_results( $wpdb->prepare( "SELECT status, source, verdict, COUNT(*) AS n FROM {$table} WHERE detected_at >= %s GROUP BY status, source, verdict", gmdate( 'Y-m-d H:i:s', $since ) ), ARRAY_A ); // phpcs:ignore WordPress.DB
+		foreach ( (array) $rows as $row ) {
+			if ( 'ignored' === $row['status'] ) {
+				$bucket = 'false_positive';
+			} elseif ( 'heuristic' === $row['source'] ) {
+				$bucket = 'heuristic';
+			} elseif ( in_array( $row['source'], array( 'integrity', 'behaviour', 'database' ), true ) ) {
+				$bucket = 'other';
+			} else {
+				$bucket = 'malicious' === $row['verdict'] ? 'malware' : 'suspicious';
+			}
+			$out[ $bucket ] += (int) $row['n'];
+		}
+		return $out;
+	}
+
 	/** @return array<string, int> Open findings per severity, plus 'total', 'malicious', 'suspicious'. */
 	public function open_counts(): array {
 		global $wpdb;
@@ -229,6 +341,7 @@ final class Findings {
 			}
 		}
 		$counts['total'] = $counts['malicious'] + $counts['suspicious'];
+		$counts['confirmed'] = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status = 'open' AND verdict = 'malicious' AND confidence >= 90 AND source IN ('signature', 'imunify')" ); // phpcs:ignore WordPress.DB
 		return $counts;
 	}
 

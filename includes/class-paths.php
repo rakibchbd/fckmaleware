@@ -117,6 +117,32 @@ final class Paths {
 	}
 
 	/**
+	 * Create a file that must not exist yet (exclusive create), so a file
+	 * that appears at the location in the meantime is never overwritten.
+	 *
+	 * @return true|\WP_Error
+	 */
+	public static function write_new( string $absolute, string $content, ?int $perms = null ) {
+		// phpcs:disable WordPress.WP.AlternativeFunctions, WordPress.PHP.NoSilencedErrors
+		$handle = @fopen( $absolute, 'xb' );
+		if ( false === $handle ) {
+			return new \WP_Error( 'fckmw_exists', __( 'A file already exists at the original location, or it cannot be created. Nothing was overwritten.', 'fckmaleware' ) );
+		}
+		$written = fwrite( $handle, $content );
+		fclose( $handle );
+		if ( strlen( $content ) !== $written ) {
+			@unlink( $absolute );
+			return new \WP_Error( 'fckmw_write', __( 'Could not write the file (disk full or permissions).', 'fckmaleware' ) );
+		}
+		if ( null !== $perms ) {
+			@chmod( $absolute, $perms );
+		}
+		// phpcs:enable
+		clearstatcache( true, $absolute );
+		return true;
+	}
+
+	/**
 	 * Files that keep the site running: removing them takes the site down, so
 	 * they must be repaired (official copy / manual edit) instead of quarantined.
 	 */
@@ -128,11 +154,24 @@ final class Paths {
 	}
 
 	/**
+	 * Configuration files whose removal takes the site down or changes its
+	 * behaviour (root .htaccess, .user.ini, wp-config.php one level up).
+	 * Infected copies must be cleaned by hand, never bulk-quarantined.
+	 */
+	public static function is_critical_config( string $relative ): bool {
+		return in_array( $relative, array( '.htaccess', '.user.ini', 'php.ini', 'web.config', 'wp-config.php', '../wp-config.php' ), true );
+	}
+
+	/**
 	 * Private directory under uploads for scan state, signature updates and
 	 * quarantine. The name carries a random suffix so it cannot be guessed on
 	 * servers that ignore .htaccess (nginx); 0.x used a fixed name and is migrated.
 	 */
 	public static function data_dir(): string {
+		$custom = self::custom_data_dir();
+		if ( null !== $custom ) {
+			return $custom;
+		}
 		$uploads = wp_upload_dir( null, false );
 		$base    = trailingslashit( wp_normalize_path( $uploads['basedir'] ) );
 		$name    = (string) Store::get( self::DATA_DIR_OPTION, '' );
@@ -147,6 +186,76 @@ final class Paths {
 		return $base . $name;
 	}
 
+	/**
+	 * Data directory chosen by the administrator with
+	 * define( 'FCKMW_DATA_DIR', '/home/account/fckmw-data' ); in wp-config.php,
+	 * ideally outside the web root. Must be an absolute path without "..".
+	 */
+	public static function custom_data_dir(): ?string {
+		if ( ! defined( 'FCKMW_DATA_DIR' ) || ! is_string( FCKMW_DATA_DIR ) || '' === FCKMW_DATA_DIR ) {
+			return null;
+		}
+		$dir = untrailingslashit( wp_normalize_path( FCKMW_DATA_DIR ) );
+		if ( false !== strpos( $dir, "\0" ) || preg_match( '#(^|/)\.\.?(/|$)#', $dir ) || ! ( '/' === substr( $dir, 0, 1 ) || preg_match( '#^[a-zA-Z]:/#', $dir ) ) ) {
+			return null;
+		}
+		return $dir;
+	}
+
+	/** Whether the data directory can be reached through the web server. */
+	public static function data_dir_in_web_root(): bool {
+		$dir  = trailingslashit( wp_normalize_path( self::data_dir() ) );
+		$real = realpath( $dir );
+		$dir  = false !== $real ? trailingslashit( wp_normalize_path( $real ) ) : $dir;
+		return 0 === strpos( $dir, self::root() );
+	}
+
+	/**
+	 * Move stored quarantine copies and signature databases when the data
+	 * directory changes (e.g. FCKMW_DATA_DIR was added). Each file is copied,
+	 * verified byte-for-byte and only then removed from the old place.
+	 *
+	 * @return array{moved: int, failed: int}
+	 */
+	public static function migrate_data_dir(): array {
+		$out     = array( 'moved' => 0, 'failed' => 0 );
+		$current = wp_normalize_path( self::data_dir() );
+		$active  = (string) Store::get( 'fckmw_data_dir_active', '' );
+		if ( '' === $active ) {
+			Store::set( 'fckmw_data_dir_active', $current );
+			return $out;
+		}
+		if ( $active === $current || ! is_dir( $active ) || is_link( $active ) ) {
+			if ( $active !== $current ) {
+				Store::set( 'fckmw_data_dir_active', $current );
+			}
+			return $out;
+		}
+		if ( ! self::ensure_data_dir() ) {
+			return $out;
+		}
+		foreach ( array( 'quarantine', 'signatures' ) as $sub ) {
+			// Two patterns: GLOB_BRACE is missing on some C libraries (musl).
+			foreach ( array_merge( (array) glob( $active . '/' . $sub . '/*.quar' ), (array) glob( $active . '/' . $sub . '/*.json' ) ) as $file ) {
+				$target = $current . '/' . $sub . '/' . basename( (string) $file );
+				// phpcs:disable WordPress.WP.AlternativeFunctions, WordPress.PHP.NoSilencedErrors
+				if ( is_link( $file ) || file_exists( $target ) || ! @copy( (string) $file, $target ) || ! hash_equals( (string) hash_file( 'sha256', (string) $file ), (string) hash_file( 'sha256', $target ) ) ) {
+					$out['failed']++;
+					continue;
+				}
+				@chmod( $target, 0600 );
+				@unlink( (string) $file );
+				// phpcs:enable
+				$out['moved']++;
+			}
+		}
+		if ( ! $out['failed'] ) {
+			Store::set( 'fckmw_data_dir_active', $current );
+		}
+		ActivityLog::log( 'storage.migrated', sprintf( /* translators: 1: moved, 2: failed */ __( 'Data directory changed: %1$d stored files moved, %2$d failed.', 'fckmaleware' ), $out['moved'], $out['failed'] ), $out, $out['failed'] ? 'warning' : 'notice' );
+		return $out;
+	}
+
 	public static function quarantine_dir(): string {
 		return self::data_dir() . '/quarantine';
 	}
@@ -159,7 +268,7 @@ final class Paths {
 
 	/** Create the data directories and lock them down against web access. */
 	public static function ensure_data_dir(): bool {
-		foreach ( array( self::data_dir(), self::quarantine_dir(), self::data_dir() . '/signatures' ) as $dir ) {
+		foreach ( array( self::data_dir(), self::quarantine_dir(), self::data_dir() . '/signatures', self::data_dir() . '/backups' ) as $dir ) {
 			if ( ! wp_mkdir_p( $dir ) ) {
 				return false;
 			}

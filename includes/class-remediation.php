@@ -305,6 +305,81 @@ final class Remediation {
 		return true;
 	}
 
+	/**
+	 * Why a finding must not be quarantined (null when it may be).
+	 *
+	 * Hard rules apply always. With $policy (bulk "all matching / all
+	 * eligible" selections), weaker detections are left for review too.
+	 */
+	public function quarantine_eligibility( array $finding, bool $policy = true ): ?string {
+		$file = (string) $finding['file'];
+		if ( 'file' !== $finding['object_type'] ) {
+			return __( 'Not a file (database record, account or setting): review it where it lives.', 'fckmaleware' );
+		}
+		if ( 'FMW-INT-003' === $finding['signature_id'] ) {
+			return __( 'The file is missing, so there is nothing to quarantine.', 'fckmaleware' );
+		}
+		if ( Paths::is_critical_config( $file ) ) {
+			return __( 'Critical configuration file: clean it by hand instead of removing it.', 'fckmaleware' );
+		}
+		if ( Paths::is_core( $file ) && 'FMW-INT-002' !== $finding['signature_id'] ) {
+			return __( 'WordPress core file: use "Replace with official copy" instead.', 'fckmaleware' );
+		}
+		if ( ! $policy ) {
+			return null;
+		}
+		if ( 'integrity' === $finding['source'] && 'FMW-INT-002' !== $finding['signature_id'] ) {
+			return __( 'Modified file: replace it with the official copy or accept the change.', 'fckmaleware' );
+		}
+		if ( in_array( $finding['remediation'], array( 'clean', 'repair' ), true ) ) {
+			return __( 'Injected code in a legitimate file: clean or reinstall it instead.', 'fckmaleware' );
+		}
+		if ( 'malicious' !== $finding['verdict'] ) {
+			return __( 'Suspicious only: review before quarantining.', 'fckmaleware' );
+		}
+		$minimum = (int) Settings::get( 'bulk_min_confidence' );
+		if ( (int) $finding['confidence'] < $minimum ) {
+			/* translators: %d: confidence threshold */
+			return sprintf( __( 'Confidence below the bulk threshold (%d%%).', 'fckmaleware' ), $minimum );
+		}
+		if ( 'heuristic' === $finding['source'] && self::in_active_component( $file ) ) {
+			return __( 'Heuristic match in an active plugin or theme: review it first.', 'fckmaleware' );
+		}
+		return null;
+	}
+
+	/** Whether a path belongs to an active plugin (any site) or the active theme. */
+	public static function in_active_component( string $file ): bool {
+		static $prefixes = null;
+		if ( null === $prefixes ) {
+			$prefixes = array();
+			$plugins  = array_merge( (array) get_option( 'active_plugins', array() ), is_multisite() ? array_keys( (array) get_site_option( 'active_sitewide_plugins', array() ) ) : array() );
+			$base     = Paths::relative( wp_normalize_path( WP_PLUGIN_DIR ) );
+			foreach ( $plugins as $plugin ) {
+				$plugin = (string) $plugin;
+				if ( null !== $base ) {
+					$prefixes[] = trailingslashit( $base ) . ( false === strpos( $plugin, '/' ) ? $plugin : dirname( $plugin ) . '/' );
+				}
+			}
+			foreach ( array_unique( array( get_stylesheet_directory(), get_template_directory() ) ) as $dir ) {
+				$relative = Paths::relative( wp_normalize_path( $dir ) );
+				if ( null !== $relative ) {
+					$prefixes[] = trailingslashit( $relative );
+				}
+			}
+			$mu = Paths::relative( wp_normalize_path( WPMU_PLUGIN_DIR ) );
+			if ( null !== $mu ) {
+				$prefixes[] = trailingslashit( $mu );
+			}
+		}
+		foreach ( $prefixes as $prefix ) {
+			if ( 0 === strpos( $file, $prefix ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	// --- Automatic quarantine ---------------------------------------------------
 
 	/**
@@ -312,7 +387,7 @@ final class Remediation {
 	 * files (premium code has no reference copy), or ambiguous detections.
 	 */
 	public static function auto_eligible( array $detection, string $file ): bool {
-		if ( 'malicious' !== ( $detection['verdict'] ?? '' ) || Paths::is_core( $file ) ) {
+		if ( 'malicious' !== ( $detection['verdict'] ?? '' ) || Paths::is_core( $file ) || Paths::is_critical_config( $file ) ) {
 			return false;
 		}
 		$uploads = Paths::uploads_relative();
@@ -335,6 +410,11 @@ final class Remediation {
 	 */
 	public function maybe_auto_quarantine( array $detection, array $result ): void {
 		if ( ! Settings::get( 'auto_quarantine' ) || 'ignored' === $result['outcome'] || empty( $detection['file'] ) ) {
+			return;
+		}
+		// When a server scanner is the primary remediation owner, FCK Malware only
+		// reports, so two products never race to move the same file.
+		if ( 'server' === Settings::get( 'primary_scanner' ) && Settings::get( 'imunify_enabled' ) ) {
 			return;
 		}
 		$file = (string) $detection['file'];

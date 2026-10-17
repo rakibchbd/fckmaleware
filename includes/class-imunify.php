@@ -51,6 +51,26 @@ final class Imunify {
 		return $this->binary;
 	}
 
+	/** Product behind a binary path: "Imunify360" or "ImunifyAV". */
+	public static function product_of( string $binary ): string {
+		return false !== strpos( basename( $binary ), 'imunify-antivirus' ) ? 'ImunifyAV' : 'Imunify360';
+	}
+
+	public function product(): string {
+		return '' === $this->binary ? 'Imunify360' : self::product_of( $this->binary );
+	}
+
+	/** Known binaries that exist on this server, keyed by product. */
+	public static function detected(): array {
+		$out = array();
+		foreach ( self::KNOWN_BINARIES as $path ) {
+			if ( @is_executable( $path ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors -- open_basedir may forbid the check.
+				$out[ self::product_of( $path ) ] = $out[ self::product_of( $path ) ] ?? $path;
+			}
+		}
+		return $out;
+	}
+
 	public function is_available(): bool {
 		return '' !== $this->binary && function_exists( 'proc_open' );
 	}

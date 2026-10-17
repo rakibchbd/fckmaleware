@@ -22,6 +22,47 @@ final class Hardening {
 
 	/** @return array<string, array{title: string, description: string, risk: string, compatibility: string, rollback: string, toggle: bool}> */
 	public static function catalog(): array {
+		$meta    = array(
+			'uploads_php'        => array( 'php', 'high' ),
+			'disallow_file_edit' => array( 'core', 'medium' ),
+			'disable_xmlrpc'     => array( 'api', 'medium' ),
+			'rest_users'         => array( 'api', 'low' ),
+			'author_enum'        => array( 'auth', 'low' ),
+			'security_headers'   => array( 'headers', 'low' ),
+			'debug_exposure'     => array( 'config', 'medium' ),
+			'directory_listing'  => array( 'exposure', 'medium' ),
+			'exposed_backups'    => array( 'exposure', 'high' ),
+			'permissions'        => array( 'filesystem', 'high' ),
+			'updates'            => array( 'core', 'high' ),
+			'abandoned_plugins'  => array( 'core', 'medium' ),
+			'accounts'           => array( 'auth', 'medium' ),
+			'transport'          => array( 'config', 'high' ),
+			'cloaked_redirects'  => array( 'exposure', 'high' ),
+		);
+		$catalog = self::rules();
+		foreach ( $catalog as $id => $rule ) {
+			$catalog[ $id ]['category'] = $meta[ $id ][0] ?? 'core';
+			$catalog[ $id ]['level']    = $meta[ $id ][1] ?? 'medium';
+		}
+		return $catalog;
+	}
+
+	/** Categories in display order. */
+	public static function categories(): array {
+		return array(
+			'core'       => __( 'WordPress core and components', 'fckmaleware' ),
+			'auth'       => __( 'Authentication and accounts', 'fckmaleware' ),
+			'filesystem' => __( 'File permissions and filesystem', 'fckmaleware' ),
+			'headers'    => __( 'HTTP security headers', 'fckmaleware' ),
+			'api'        => __( 'XML-RPC and REST API', 'fckmaleware' ),
+			'php'        => __( 'PHP execution restrictions', 'fckmaleware' ),
+			'exposure'   => __( 'Directory and file exposure', 'fckmaleware' ),
+			'config'     => __( 'Configuration and transport', 'fckmaleware' ),
+		);
+	}
+
+	/** @return array<string, array> */
+	private static function rules(): array {
 		return array(
 			'uploads_php'       => array(
 				'title'         => __( 'Block PHP execution in uploads', 'fckmaleware' ),
@@ -253,6 +294,9 @@ final class Hardening {
 		if ( ! isset( $catalog[ $id ] ) || ! $catalog[ $id ]['toggle'] ) {
 			return new \WP_Error( 'fckmw_rule', __( 'Unknown or report-only rule.', 'fckmaleware' ) );
 		}
+		if ( 'uploads_php' === $id ) {
+			Store::delete( 'fckmw_uploads_rule_test' );
+		}
 		if ( 'uploads_php' === $id && ! self::apply_uploads_rule( $on ) ) {
 			return new \WP_Error( 'fckmw_htaccess', __( 'The uploads .htaccess file could not be written.', 'fckmaleware' ) );
 		}
@@ -260,9 +304,7 @@ final class Hardening {
 		$state[ $id ] = $on;
 		Store::set( self::OPTION, $state );
 		if ( 'uploads_php' === $id ) {
-			$settings                      = Settings::all();
-			$settings['block_uploads_php'] = $on;
-			Store::set( Settings::OPTION, $settings );
+			Settings::update( array( 'block_uploads_php' => $on ? '1' : '' ), array( 'block_uploads_php' ) );
 		}
 		delete_site_transient( self::STATUS_CACHE );
 		ActivityLog::log( 'hardening.' . ( $on ? 'enabled' : 'disabled' ), sprintf( /* translators: 1: enabled/disabled, 2: rule */ __( 'Hardening rule %1$s: %2$s', 'fckmaleware' ), $on ? __( 'enabled', 'fckmaleware' ) : __( 'disabled', 'fckmaleware' ), $catalog[ $id ]['title'] ), array( 'rule' => $id ), 'notice' );
@@ -279,6 +321,7 @@ final class Hardening {
 		if ( ! $enabled && ! file_exists( $file ) ) {
 			return true;
 		}
+		self::backup_file( $file, 'uploads-htaccess' );
 		$lines = $enabled ? array(
 			'<FilesMatch "\.(?i:php[0-9]?|phtml|phar|pht|phps)$">',
 			'	<IfModule mod_authz_core.c>',
@@ -291,6 +334,62 @@ final class Hardening {
 			'</FilesMatch>',
 		) : array();
 		return insert_with_markers( $file, self::MARKER, $lines );
+	}
+
+	/**
+	 * Keep a copy of a configuration file before changing it (newest five per
+	 * name) in the private data folder.
+	 */
+	public static function backup_file( string $file, string $name ): void {
+		if ( ! is_file( $file ) || ! Paths::ensure_data_dir() ) {
+			return;
+		}
+		$dir = Paths::data_dir() . '/backups';
+		// phpcs:disable WordPress.WP.AlternativeFunctions, WordPress.PHP.NoSilencedErrors
+		$target = $dir . '/' . $name . '-' . gmdate( 'Ymd-His' ) . '.bak';
+		if ( @copy( $file, $target ) ) {
+			@chmod( $target, 0600 );
+		}
+		$old = (array) glob( $dir . '/' . $name . '-*.bak' );
+		sort( $old );
+		foreach ( array_slice( $old, 0, max( 0, count( $old ) - 5 ) ) as $stale ) {
+			@unlink( (string) $stale );
+		}
+		// phpcs:enable
+	}
+
+	/**
+	 * Check over HTTP whether PHP in uploads actually runs: a harmless probe
+	 * that only prints a marker is written to uploads, requested and deleted.
+	 * nginx and some LiteSpeed setups ignore .htaccess, so the rule being
+	 * written does not prove it is enforced.
+	 *
+	 * @return array{state: string, detail: string}
+	 */
+	public function test_uploads_rule(): array {
+		$uploads = wp_upload_dir( null, false );
+		$name    = 'fckmw-probe-' . strtolower( wp_generate_password( 12, false, false ) ) . '.php';
+		$path    = trailingslashit( $uploads['basedir'] ) . $name;
+		$marker  = 'fckmw-probe-' . wp_generate_password( 8, false, false );
+		// phpcs:ignore WordPress.WP.AlternativeFunctions
+		if ( false === @file_put_contents( $path, "<?php echo '" . $marker . "-' . 'ran';\n" ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors
+			$result = self::result( 'unknown', __( 'Could not write the test file to uploads.', 'fckmaleware' ) );
+		} else {
+			$response = wp_remote_get( trailingslashit( $uploads['baseurl'] ) . $name, array( 'timeout' => 10, 'redirection' => 0, 'sslverify' => false ) );
+			wp_delete_file( $path );
+			if ( is_wp_error( $response ) ) {
+				$result = self::result( 'unknown', sprintf( /* translators: %s: error */ __( 'The site could not request its own uploads folder (%s), so enforcement could not be tested.', 'fckmaleware' ), $response->get_error_message() ) );
+			} elseif ( false !== strpos( (string) wp_remote_retrieve_body( $response ), $marker . '-ran' ) ) {
+				$result = self::result( 'fail', __( 'Test failed: a PHP file in uploads was executed. The server does not enforce the rule (nginx ignores .htaccess); add the server rule shown below.', 'fckmaleware' ) );
+			} else {
+				/* translators: %d: HTTP status */
+				$result = self::result( 'pass', sprintf( __( 'Test passed: a PHP file in uploads was not executed (HTTP %d).', 'fckmaleware' ), (int) wp_remote_retrieve_response_code( $response ) ) );
+			}
+		}
+		Store::set( 'fckmw_uploads_rule_test', $result + array( 'time' => time() ) );
+		ActivityLog::log( 'hardening.tested', sprintf( /* translators: %s: result */ __( 'Uploads PHP execution test: %s', 'fckmaleware' ), $result['detail'] ), array( 'state' => $result['state'] ), 'fail' === $result['state'] ? 'warning' : 'info' );
+		delete_site_transient( self::STATUS_CACHE );
+		return $result;
 	}
 
 	// --- Status -----------------------------------------------------------------
@@ -334,7 +433,11 @@ final class Hardening {
 		if ( false !== strpos( $server, 'nginx' ) ) {
 			return self::result( 'info', __( 'This server runs nginx, which ignores .htaccess. Add: location ~* ^/wp-content/uploads/.*\.(?:php[0-9]?|phtml|phar)$ { deny all; }', 'fckmaleware' ) );
 		}
-		return $on ? self::result( 'pass', __( 'PHP execution in uploads is blocked by .htaccess.', 'fckmaleware' ) ) : self::result( 'warn', __( 'PHP files placed in uploads can be executed.', 'fckmaleware' ) );
+		$test = Store::get( 'fckmw_uploads_rule_test', array() );
+		if ( is_array( $test ) && isset( $test['state'] ) && 'unknown' !== $test['state'] ) {
+			return self::result( $test['state'], $test['detail'] );
+		}
+		return $on ? self::result( 'pass', __( 'PHP execution in uploads is blocked by .htaccess. Use "Test" to confirm the server enforces it.', 'fckmaleware' ) ) : self::result( 'warn', __( 'PHP files placed in uploads can be executed.', 'fckmaleware' ) );
 	}
 
 	private function status_disallow_file_edit(): array {

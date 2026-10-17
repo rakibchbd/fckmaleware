@@ -89,6 +89,33 @@ final class Reviewer {
 	}
 
 	/**
+	 * Check the provider configuration with a fixed, synthetic sample that
+	 * contains no data from this site. Counts towards the daily limit.
+	 *
+	 * @return array{ok: bool, message: string, time: int}
+	 */
+	public static function test_connection( ?Provider $provider = null ): array {
+		$reason = self::unavailable();
+		if ( null !== $reason && null === $provider ) {
+			return array( 'ok' => false, 'message' => $reason, 'time' => time() );
+		}
+		$provider = $provider ?? self::provider();
+		$case     = "Connection test. No site data is included.\nLayer: test\nLocal verdict: suspicious\nFile: example.php\n<<<UNTRUSTED_CODE\n<?php echo 'hello world';\nUNTRUSTED_CODE>>>";
+		$answer   = $provider->review( self::SYSTEM, $case, self::schema() );
+		self::count_request( is_wp_error( $answer ) ? null : $answer );
+		$result = is_wp_error( $answer )
+			? array( 'ok' => false, 'message' => $answer->get_error_message() )
+			: ( is_wp_error( self::validate( $answer['result'] ) )
+				? array( 'ok' => false, 'message' => __( 'The provider answered, but not in the expected format. Check the model name.', 'fckmaleware' ) )
+				/* translators: %s: model */
+				: array( 'ok' => true, 'message' => sprintf( __( 'Connected: %s answered in the expected format.', 'fckmaleware' ), $answer['model'] ) ) );
+		$result['time'] = time();
+		Store::set( 'fckmw_ai_test', $result );
+		ActivityLog::log( 'ai.test', $result['message'], array( 'provider' => $provider->id(), 'ok' => $result['ok'] ), $result['ok'] ? 'info' : 'warning' );
+		return $result;
+	}
+
+	/**
 	 * Review one finding with the configured provider.
 	 *
 	 * @return array|\WP_Error Stored review.

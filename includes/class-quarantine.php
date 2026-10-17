@@ -49,12 +49,42 @@ final class Quarantine {
 		if ( is_wp_error( $key ) ) {
 			return $key;
 		}
-		$absolute = Paths::root() . $relative;
-		if ( ! @unlink( $absolute ) || file_exists( $absolute ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions
+		$removed = $this->remove_verified( Paths::root() . ltrim( wp_normalize_path( $relative ), '/' ), (string) $this->get( $key )['hash'] );
+		if ( is_wp_error( $removed ) ) {
 			$this->purge( $key );
-			return new \WP_Error( 'fckmw_unlink', __( 'Could not remove the original file (check file ownership and permissions). Nothing was changed.', 'fckmaleware' ) );
+			return $removed;
 		}
 		return $key;
+	}
+
+	/**
+	 * Remove the original only if it is still the file that was copied.
+	 *
+	 * The file is first renamed to a hidden name in the same directory (atomic,
+	 * so nothing can replace it afterwards), then re-hashed. If it changed or
+	 * was swapped for a symlink between the copy and now, it is put back and
+	 * nothing is removed.
+	 *
+	 * @return true|\WP_Error
+	 */
+	private function remove_verified( string $absolute, string $hash ) {
+		// phpcs:disable WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions
+		$hold = dirname( $absolute ) . '/.fckmw-hold-' . bin2hex( random_bytes( 6 ) ) . '.tmp';
+		if ( is_link( $absolute ) || ! @rename( $absolute, $hold ) ) {
+			return new \WP_Error( 'fckmw_unlink', __( 'Could not remove the original file (check file ownership and permissions). Nothing was changed.', 'fckmaleware' ) );
+		}
+		clearstatcache();
+		if ( is_link( $hold ) || ! hash_equals( $hash, (string) @hash_file( 'sha256', $hold ) ) ) {
+			@rename( $hold, $absolute );
+			return new \WP_Error( 'fckmw_changed', __( 'The file changed while it was being quarantined, so it was left in place. Scan it again before acting.', 'fckmaleware' ) );
+		}
+		if ( ! @unlink( $hold ) ) {
+			@rename( $hold, $absolute );
+			return new \WP_Error( 'fckmw_unlink', __( 'Could not remove the original file (check file ownership and permissions). Nothing was changed.', 'fckmaleware' ) );
+		}
+		// phpcs:enable
+		clearstatcache( true, $absolute );
+		return true;
 	}
 
 	/**
@@ -176,7 +206,12 @@ final class Quarantine {
 			return new \WP_Error( 'fckmw_outside', __( 'The original directory now points outside the WordPress directory.', 'fckmaleware' ) );
 		}
 
-		$written = Paths::write_atomic( $target, $content, (int) $item['perms'] ?: 0644 );
+		// A quarantined file is created exclusively, so a file that appeared at the
+		// location after the check above is never overwritten. A backup replaces
+		// the current file by design (it undoes a repair).
+		$written = 'backup' === ( $item['kind'] ?? 'quarantine' )
+			? Paths::write_atomic( $target, $content, (int) $item['perms'] ?: 0644 )
+			: Paths::write_new( $target, $content, (int) $item['perms'] ?: 0644 );
 		if ( is_wp_error( $written ) ) {
 			return $written;
 		}
@@ -210,6 +245,29 @@ final class Quarantine {
 			}
 		}
 		return $removed;
+	}
+
+	/**
+	 * Items as a list for the admin table, newest first, optionally filtered by
+	 * kind and a search on the original path.
+	 *
+	 * @return array<string, array> key => item
+	 */
+	public function search( string $kind = '', string $search = '' ): array {
+		$items = array_filter(
+			$this->all(),
+			static function ( array $item ) use ( $kind, $search ): bool {
+				return ( '' === $kind || $kind === ( $item['kind'] ?? 'quarantine' ) )
+					&& ( '' === $search || false !== stripos( (string) $item['file'], $search ) );
+			}
+		);
+		uasort(
+			$items,
+			static function ( array $a, array $b ): int {
+				return (int) $b['time'] <=> (int) $a['time'];
+			}
+		);
+		return $items;
 	}
 
 	/** @return array{items: int, bytes: int, quarantined: int, backups: int} */

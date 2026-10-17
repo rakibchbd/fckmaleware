@@ -32,6 +32,8 @@ final class CLI {
 	 *   - custom
 	 *   - core
 	 *   - recent
+	 *   - plugins
+	 *   - uploads
 	 * ---
 	 *
 	 * [--dir=<dir>]

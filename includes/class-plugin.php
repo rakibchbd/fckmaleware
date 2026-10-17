@@ -22,6 +22,9 @@ final class Plugin {
 	public const CRON_CONTINUE = 'fckmw_scan_continue';
 	public const CRON_DAILY    = 'fckmw_daily_maintenance';
 	public const CRON_DB       = 'fckmw_db_scan_continue';
+	public const CRON_UPLOADS  = 'fckmw_uploads_watch';
+	public const CRON_CORE     = 'fckmw_integrity_scan';
+	public const TASKS_OPTION  = 'fckmw_task_runs';
 
 	/** @var Plugin|null */
 	private static $instance;
@@ -43,14 +46,19 @@ final class Plugin {
 
 	public function boot(): void {
 		if ( ! Schema::is_current() ) {
-			self::upgrade();
+			// On init, so translated log messages written by the upgrade do not
+			// load the text domain too early (WordPress 6.7+ notice).
+			add_action( 'init', array( self::class, 'upgrade' ), 1 );
 		}
 
 		add_action( self::CRON_SCAN, array( $this, 'run_scheduled_scan' ) );
 		add_action( self::CRON_CONTINUE, array( $this, 'continue_scan' ) );
 		add_action( self::CRON_DAILY, array( $this, 'daily_maintenance' ) );
 		add_action( self::CRON_DB, array( $this, 'continue_db_scan' ) );
+		add_action( self::CRON_UPLOADS, array( $this, 'run_uploads_watch' ) );
+		add_action( self::CRON_CORE, array( $this, 'run_integrity_scan' ) );
 		add_action( 'fckmw_scan_complete', array( $this, 'on_scan_complete' ) );
+		add_action( 'fckmw_db_scan_complete', array( $this, 'on_db_scan_complete' ) );
 
 		( new Updater() )->register();
 		$this->signature_updater()->register();
@@ -60,6 +68,9 @@ final class Plugin {
 		$this->hardening()->register();
 
 		if ( is_admin() ) {
+			if ( ! wp_doing_ajax() ) {
+				Paths::migrate_data_dir();
+			}
 			( new Admin( $this ) )->register();
 		}
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
@@ -239,6 +250,24 @@ final class Plugin {
 		);
 	}
 
+	public function integrations(): ServerIntegrations {
+		return $this->service(
+			'integrations',
+			function () {
+				return new ServerIntegrations( $this );
+			}
+		);
+	}
+
+	public function bulk(): BulkJob {
+		return $this->service(
+			'bulk',
+			function () {
+				return new BulkJob( $this );
+			}
+		);
+	}
+
 	public function remediation(): Remediation {
 		return $this->service(
 			'remediation',
@@ -292,11 +321,11 @@ final class Plugin {
 					'file'           => $item['file'],
 					'signature_id'   => 'IMUNIFY:' . substr( $item['signature'], 0, 180 ),
 					'signature_name' => $item['signature'],
-					'family'         => 'Imunify360',
+					'family'         => $this->imunify()->product(),
 					'severity'       => 'critical',
 					'confidence'     => 90,
 					'verdict'        => 'malicious',
-					'evidence'       => __( 'Reported by the Imunify360 agent on this server.', 'fckmaleware' ),
+					'evidence'       => sprintf( /* translators: %s: product */ __( 'Reported by %s on this server.', 'fckmaleware' ), $this->imunify()->product() ),
 					'remediation'    => 'quarantine',
 				)
 			);
@@ -312,11 +341,49 @@ final class Plugin {
 
 	// --- Cron -----------------------------------------------------------------
 
+	/**
+	 * Remember how a scheduled task last ended, for the Schedule screen.
+	 *
+	 * @param string $status ok, skipped or error.
+	 */
+	public static function record_task( string $task, string $status, string $message = '' ): void {
+		$runs          = (array) Store::get( self::TASKS_OPTION, array() );
+		$runs[ $task ] = array( 'time' => time(), 'status' => $status, 'message' => $message );
+		Store::set( self::TASKS_OPTION, $runs );
+	}
+
+	/** @return array<string, array{time: int, status: string, message: string}> */
+	public static function task_runs(): array {
+		return (array) Store::get( self::TASKS_OPTION, array() );
+	}
+
 	public function run_scheduled_scan(): void {
 		$state = $this->scanner()->start( (string) Settings::get( 'scheduled_mode' ), 'scheduled' );
-		if ( ! is_wp_error( $state ) ) {
-			$this->continue_scan();
+		if ( is_wp_error( $state ) ) {
+			// Never two scans at once: a running scan (manual or scheduled) wins.
+			self::record_task( 'scan', 'skipped', $state->get_error_message() );
+			return;
 		}
+		self::record_task( 'scan', 'ok', __( 'Started.', 'fckmaleware' ) );
+		$this->continue_scan();
+	}
+
+	/** Weekly or daily core integrity check (a "core" mode scan). */
+	public function run_integrity_scan(): void {
+		$state = $this->scanner()->start( 'core', 'scheduled' );
+		if ( is_wp_error( $state ) ) {
+			self::record_task( 'integrity', 'skipped', $state->get_error_message() );
+			// Try again later today rather than waiting a whole period.
+			wp_schedule_single_event( time() + HOUR_IN_SECONDS, self::CRON_CORE );
+			return;
+		}
+		self::record_task( 'integrity', 'ok', __( 'Started.', 'fckmaleware' ) );
+		$this->continue_scan();
+	}
+
+	public function run_uploads_watch(): void {
+		$this->monitor()->watch_uploads();
+		$this->monitor()->process_queue();
 	}
 
 	/** Cron continuation: one time-boxed step, then re-queue until done. */
@@ -328,6 +395,10 @@ final class Plugin {
 	}
 
 	public function on_scan_complete( array $state ): void {
+		if ( 'scheduled' === $state['trigger'] ) {
+			/* translators: 1: files, 2: detections */
+			self::record_task( 'core' === $state['mode'] ? 'integrity' : 'scan', 'ok', sprintf( __( 'Finished: %1$d files, %2$d detections.', 'fckmaleware' ), $state['total'], $state['found'] ) );
+		}
 		if ( Settings::get( 'imunify_enabled' ) && Settings::get( 'imunify_sync_scan' ) ) {
 			$this->sync_imunify();
 		}
@@ -337,6 +408,13 @@ final class Plugin {
 			if ( ! is_wp_error( $this->db_scanner()->start( 'scheduled' ) ) ) {
 				$this->continue_db_scan();
 			}
+		}
+	}
+
+	public function on_db_scan_complete( array $state ): void {
+		if ( 'scheduled' === ( $state['trigger'] ?? '' ) ) {
+			/* translators: 1: rows, 2: detections */
+			self::record_task( 'database', 'ok', sprintf( __( 'Finished: %1$d rows, %2$d detections.', 'fckmaleware' ), $state['rows'], $state['found'] ) );
 		}
 	}
 
@@ -355,18 +433,45 @@ final class Plugin {
 			ActivityLog::log( 'quarantine.expired', sprintf( /* translators: %d: count */ __( 'Deleted %d quarantined copies past the retention period.', 'fckmaleware' ), $expired ), array( 'count' => $expired ) );
 		}
 		$this->persistence()->run( 'daily' );
+		self::record_task( 'maintenance', 'ok', $expired ? sprintf( /* translators: %d: count */ __( '%d expired quarantine copies deleted.', 'fckmaleware' ), $expired ) : __( 'Logs pruned, persistence checked.', 'fckmaleware' ) );
 	}
 
 	// --- Lifecycle ------------------------------------------------------------
 
+	/**
+	 * Next occurrence of $hour:00 in the site's time zone, so daily and weekly
+	 * work runs at a predictable, quiet time.
+	 */
+	public static function next_at_hour( int $hour ): int {
+		$now  = new \DateTimeImmutable( 'now', wp_timezone() );
+		$next = $now->setTime( max( 0, min( 23, $hour ) ), 0 );
+		if ( $next <= $now ) {
+			$next = $next->modify( '+1 day' );
+		}
+		return $next->getTimestamp();
+	}
+
+	/** (Re)create every recurring event once; clearing first prevents duplicates. */
 	public static function reschedule(): void {
+		$settings = Settings::all();
+		$hour     = (int) $settings['schedule_hour'];
+
 		wp_clear_scheduled_hook( self::CRON_SCAN );
-		$schedule = (string) Settings::get( 'schedule' );
-		if ( 'off' !== $schedule ) {
-			wp_schedule_event( time() + HOUR_IN_SECONDS, $schedule, self::CRON_SCAN );
+		if ( 'off' !== $settings['schedule'] ) {
+			$first = in_array( $settings['schedule'], array( 'daily', 'weekly' ), true ) ? self::next_at_hour( $hour ) : time() + HOUR_IN_SECONDS;
+			wp_schedule_event( $first, $settings['schedule'], self::CRON_SCAN );
+		}
+		wp_clear_scheduled_hook( self::CRON_CORE );
+		if ( 'off' !== $settings['integrity_schedule'] ) {
+			// Offset by two hours so it does not collide with the main scan.
+			wp_schedule_event( self::next_at_hour( ( $hour + 2 ) % 24 ), $settings['integrity_schedule'], self::CRON_CORE );
+		}
+		wp_clear_scheduled_hook( self::CRON_UPLOADS );
+		if ( 'off' !== $settings['uploads_watch'] ) {
+			wp_schedule_event( time() + 15 * MINUTE_IN_SECONDS, $settings['uploads_watch'], self::CRON_UPLOADS );
 		}
 		if ( ! wp_next_scheduled( self::CRON_DAILY ) ) {
-			wp_schedule_event( time() + 2 * HOUR_IN_SECONDS, 'daily', self::CRON_DAILY );
+			wp_schedule_event( self::next_at_hour( ( $hour + 1 ) % 24 ), 'daily', self::CRON_DAILY );
 		}
 		if ( ! wp_next_scheduled( SignatureUpdater::CRON ) ) {
 			wp_schedule_event( time() + 10 * MINUTE_IN_SECONDS, 'twicedaily', SignatureUpdater::CRON );
@@ -392,6 +497,29 @@ final class Plugin {
 		$state = Store::get( Scanner::STATE_OPTION, array() );
 		if ( is_array( $state ) && isset( $state['status'] ) && ! isset( $state['phase'] ) ) {
 			Store::delete( Scanner::STATE_OPTION );
+		}
+		// 1.1 keeps a scan history; start it with the last scan recorded before.
+		$last = Store::get( 'fckmw_last_scan', array() );
+		if ( is_array( $last ) && ! empty( $last['finished'] ) && ! ScanHistory::all() ) {
+			ScanHistory::add(
+				array(
+					'kind'     => 'file',
+					'id'       => (string) ( $last['id'] ?? '' ),
+					'mode'     => (string) ( $last['mode'] ?? 'standard' ),
+					'trigger'  => (string) ( $last['trigger'] ?? '' ),
+					'scope'    => (string) ( $last['scope'] ?? '' ),
+					'status'   => 'complete',
+					'files'    => (int) ( $last['total'] ?? 0 ),
+					'total'    => (int) ( $last['total'] ?? 0 ),
+					'skipped'  => (int) ( $last['skipped'] ?? 0 ),
+					'found'    => (int) ( $last['found'] ?? 0 ),
+					'new'      => (int) ( $last['new'] ?? 0 ),
+					'errors'   => count( (array) ( $last['errors'] ?? array() ) ),
+					'large'    => (int) ( $last['too_large'] ?? 0 ),
+					'started'  => (int) ( $last['started'] ?? 0 ),
+					'finished' => (int) $last['finished'],
+				)
+			);
 		}
 		Paths::ensure_data_dir();
 		self::reschedule();
@@ -433,6 +561,8 @@ final class Plugin {
 		wp_clear_scheduled_hook( self::CRON_CONTINUE );
 		wp_clear_scheduled_hook( self::CRON_DAILY );
 		wp_clear_scheduled_hook( self::CRON_DB );
+		wp_clear_scheduled_hook( self::CRON_UPLOADS );
+		wp_clear_scheduled_hook( self::CRON_CORE );
 		wp_clear_scheduled_hook( Monitor::CRON_QUEUE );
 		wp_clear_scheduled_hook( SignatureUpdater::CRON );
 		wp_clear_scheduled_hook( Notifier::CRON );

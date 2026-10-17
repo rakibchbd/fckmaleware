@@ -12,6 +12,7 @@ use Fckmaleware\Admin\Ui;
 use Fckmaleware\Ai\Reviewer;
 use Fckmaleware\Detection\Heuristics;
 use Fckmaleware\Settings;
+use Fckmaleware\Store;
 
 final class Intelligence extends Page {
 
@@ -23,7 +24,7 @@ final class Intelligence extends Page {
 		$stats    = Reviewer::stats();
 		$reason   = Reviewer::unavailable();
 
-		Ui::header( $title, __( 'Detection decisions are made by deterministic local engines. An external AI model can be asked for a second opinion on single findings; it is advisory, sees only a redacted excerpt and can never change, delete or execute anything.', 'fckmaleware' ) );
+		Ui::header( $title, __( 'Detection decisions are made by deterministic local engines that work without any external service. An external AI model can be asked for a second opinion on single findings; it is advisory, sees only a redacted excerpt and can never change, delete or execute anything. Nothing it suggests is run automatically.', 'fckmaleware' ) );
 
 		echo '<div class="fckmw-grid">';
 		Ui::card_start( __( 'Local heuristic engine', 'fckmaleware' ) );
@@ -48,7 +49,16 @@ final class Intelligence extends Page {
 			echo '<p class="description">' . esc_html( $reason ) . '</p>';
 		}
 		echo '<p>' . esc_html__( 'What is sent: detection metadata (rule, layer, local verdict, line, evidence, file path) and a code excerpt of at most the configured number of characters. Before sending, the site path, domain and table prefix are replaced with placeholders, and database credentials, password/secret/token assignments, private keys, common API key formats, credentials in URLs and e-mail addresses are redacted. For wp-config.php only three lines around the match are used. Nothing is sent automatically: each review is started by an administrator.', 'fckmaleware' ) . '</p>';
-		echo '<p><a class="button" href="' . esc_url( Ui::url( 'settings' ) . '#ai' ) . '">' . esc_html__( 'Configure', 'fckmaleware' ) . '</a></p>';
+		$test = Store::get( 'fckmw_ai_test', array() );
+		if ( is_array( $test ) && isset( $test['ok'] ) ) {
+			/* translators: %s: time */
+			echo '<p>' . Ui::status( $test['ok'] ? __( 'Last test passed', 'fckmaleware' ) : __( 'Last test failed', 'fckmaleware' ), $test['ok'] ? 'good' : 'bad' ) . ' <span class="description">' . esc_html( $test['message'] . ' · ' . Ui::ago( (int) $test['time'] ) ) . '</span></p>'; // phpcs:ignore WordPress.Security.EscapeOutput
+		}
+		echo '<div class="fckmw-actions"><a class="button" href="' . esc_url( Ui::url( 'settings' ) . '#ai' ) . '">' . esc_html__( 'Configure', 'fckmaleware' ) . '</a>';
+		if ( 'none' !== $settings['ai_provider'] && $settings['ai_consent'] ) {
+			Ui::action_button( 'ai_test', __( 'Test connection', 'fckmaleware' ), array( 'return' => 'ai' ), 'button', __( 'Send a fixed sample ("<?php echo \'hello world\';") to the provider? No data from this site is included. It counts as one review towards the daily limit.', 'fckmaleware' ) );
+		}
+		echo '</div>';
 		Ui::card_end();
 
 		Ui::card_start( __( 'AI review results', 'fckmaleware' ) );

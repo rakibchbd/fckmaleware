@@ -27,7 +27,7 @@ use Fckmaleware\Detection\FileContext;
 final class Scanner {
 
 	public const STATE_OPTION = 'fckmw_scan_state';
-	public const MODES        = array( 'quick', 'standard', 'deep', 'custom', 'core', 'recent' );
+	public const MODES        = array( 'quick', 'standard', 'deep', 'custom', 'core', 'recent', 'plugins', 'uploads' );
 
 	private const LOCK        = 'scan';
 	private const LIST_FILE   = 'scan-files.txt';
@@ -110,6 +110,10 @@ final class Scanner {
 					return new \WP_Error( 'fckmw_scope', __( 'Choose an existing directory inside the WordPress installation.', 'fckmaleware' ) );
 				}
 				$scope = (string) Paths::relative( $resolved );
+				$data  = (string) Paths::relative( wp_normalize_path( Paths::data_dir() ) );
+				if ( '' !== $data && 0 === strpos( trailingslashit( $scope ), trailingslashit( $data ) ) ) {
+					return new \WP_Error( 'fckmw_scope', __( 'The plugin\'s private data folder (quarantine) cannot be scanned.', 'fckmaleware' ) );
+				}
 			}
 
 			if ( false === file_put_contents( Paths::data_dir() . '/' . self::LIST_FILE, '' ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions
@@ -228,8 +232,21 @@ final class Scanner {
 		if ( 'core' === $mode ) {
 			return array( array( '', false ), array( 'wp-admin', true ), array( 'wp-includes', true ) );
 		}
+		$root = Paths::root();
+		if ( 'plugins' === $mode || 'uploads' === $mode ) {
+			$units = array();
+			foreach ( self::scoped_dirs( $mode ) as $base ) {
+				if ( ! is_dir( $root . $base ) ) {
+					continue;
+				}
+				$units[] = array( $base, false );
+				foreach ( self::subdirs( $root . $base ) as $child ) {
+					$units[] = array( $base . '/' . $child, true );
+				}
+			}
+			return $units;
+		}
 
-		$root  = Paths::root();
 		$units = array( array( '', false ) );
 		foreach ( self::subdirs( $root ) as $dir ) {
 			if ( 'wp-content' === $dir ) {
@@ -250,6 +267,28 @@ final class Scanner {
 			}
 		}
 		return $units;
+	}
+
+	/**
+	 * Directories (relative to the root) covered by the plugins/themes and
+	 * uploads modes.
+	 *
+	 * @return string[]
+	 */
+	public static function scoped_dirs( string $mode ): array {
+		if ( 'uploads' === $mode ) {
+			$uploads = rtrim( Paths::uploads_relative(), '/' );
+			return '' === $uploads ? array() : array( $uploads );
+		}
+		$content = Paths::relative( wp_normalize_path( WP_CONTENT_DIR ) ) ?? 'wp-content';
+		$dirs    = array();
+		foreach ( array( WP_PLUGIN_DIR, WPMU_PLUGIN_DIR, get_theme_root() ) as $dir ) {
+			$relative = Paths::relative( wp_normalize_path( (string) $dir ) );
+			if ( null !== $relative && '' !== $relative ) {
+				$dirs[] = rtrim( $relative, '/' );
+			}
+		}
+		return $dirs ? array_values( array_unique( $dirs ) ) : array( $content . '/plugins', $content . '/themes' );
 	}
 
 	/** @return string[] Non-symlink subdirectory names, minus VCS folders. */
@@ -273,7 +312,7 @@ final class Scanner {
 		if ( false === $handle ) {
 			throw new \RuntimeException( 'Cannot append to the scan file list.' );
 		}
-		$images    = 'deep' === $state['mode'] || (bool) Settings::get( 'scan_images' );
+		$images    = in_array( $state['mode'], array( 'deep', 'uploads' ), true ) || (bool) Settings::get( 'scan_images' );
 		$max_bytes = (int) Settings::get( 'max_file_size_mb' ) * MB_IN_BYTES;
 		$exclude   = self::excluded_dirs();
 		$types     = 'quick' === $state['mode'] ? array( 'php', 'htaccess', 'ini' ) : null;
@@ -365,7 +404,11 @@ final class Scanner {
 		 *
 		 * @param string[] $dirs Defaults to the private data directory.
 		 */
-		$dirs = (array) apply_filters( 'fckmw_scan_exclude_dirs', array( Paths::data_dir() ) );
+		$dirs = array( Paths::data_dir() );
+		foreach ( Settings::exclusions() as $relative ) {
+			$dirs[] = Paths::root() . $relative;
+		}
+		$dirs = (array) apply_filters( 'fckmw_scan_exclude_dirs', $dirs );
 		return array_values( array_filter( array_map( 'wp_normalize_path', array_map( 'untrailingslashit', $dirs ) ) ) );
 	}
 
@@ -373,7 +416,7 @@ final class Scanner {
 
 	private function engine( array $state ): Engine {
 		$options = array(
-			'images' => 'deep' === $state['mode'] || (bool) Settings::get( 'scan_images' ),
+			'images' => in_array( $state['mode'], array( 'deep', 'uploads' ), true ) || (bool) Settings::get( 'scan_images' ),
 			'record' => in_array( $state['mode'], array( 'standard', 'deep' ), true ),
 		);
 		return ( $this->engine_factory )( $options['record'] ? (array) $state['recording'] : null, $options );
@@ -386,7 +429,7 @@ final class Scanner {
 		$use_cache           = in_array( $state['mode'], array( 'quick', 'standard' ), true );
 		$throttle            = (int) Settings::get( 'throttle_ms' ) * 1000;
 		$memory_limit        = self::memory_limit();
-		$images              = 'deep' === $state['mode'] || (bool) Settings::get( 'scan_images' );
+		$images              = in_array( $state['mode'], array( 'deep', 'uploads' ), true ) || (bool) Settings::get( 'scan_images' );
 
 		$handle = fopen( Paths::data_dir() . '/' . self::LIST_FILE, 'r' ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 		if ( false === $handle ) {
@@ -548,6 +591,10 @@ final class Scanner {
 			$resolved = $this->findings->resolve_stale( $state['id'], self::FILE_SOURCES );
 		} elseif ( 'custom' === $state['mode'] ) {
 			$resolved = $this->findings->resolve_stale( $state['id'], self::FILE_SOURCES, 'file', trailingslashit( $state['scope'] ) );
+		} elseif ( 'plugins' === $state['mode'] || 'uploads' === $state['mode'] ) {
+			foreach ( self::scoped_dirs( $state['mode'] ) as $prefix ) {
+				$resolved += $this->findings->resolve_stale( $state['id'], self::FILE_SOURCES, 'file', trailingslashit( $prefix ) );
+			}
 		} elseif ( 'core' === $state['mode'] ) {
 			foreach ( array( 'wp-admin/', 'wp-includes/' ) as $prefix ) {
 				$resolved += $this->findings->resolve_stale( $state['id'], array( 'integrity', 'signature', 'heuristic' ), 'file', $prefix );
@@ -565,6 +612,25 @@ final class Scanner {
 		unset( $state['units'] );
 		$this->save( $state );
 		wp_delete_file( Paths::data_dir() . '/' . self::LIST_FILE );
+		ScanHistory::add(
+			array(
+				'kind'     => 'file',
+				'id'       => (string) ( $state['id'] ?? '' ),
+				'mode'     => (string) ( $state['mode'] ?? '' ),
+				'trigger'  => (string) ( $state['trigger'] ?? '' ),
+				'scope'    => (string) ( $state['scope'] ?? '' ),
+				'status'   => $status,
+				'files'    => (int) ( $state['position'] ?? 0 ),
+				'total'    => (int) ( $state['total'] ?? 0 ),
+				'skipped'  => (int) ( $state['skipped'] ?? 0 ),
+				'found'    => (int) ( $state['found'] ?? 0 ),
+				'new'      => (int) ( $state['new'] ?? 0 ),
+				'errors'   => count( (array) ( $state['errors'] ?? array() ) ),
+				'large'    => (int) ( $state['too_large'] ?? 0 ),
+				'started'  => (int) ( $state['started'] ?? 0 ),
+				'finished' => (int) $state['finished'],
+			)
+		);
 
 		if ( 'complete' === $status ) {
 			Store::set( 'fckmw_last_scan', $state );

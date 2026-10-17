@@ -135,9 +135,12 @@ final class SignatureUpdater {
 	}
 
 	public function scheduled_check(): void {
-		if ( Settings::get( 'signature_updates' ) ) {
-			$this->check();
+		if ( ! Settings::get( 'signature_updates' ) ) {
+			Plugin::record_task( 'signatures', 'skipped', __( 'Signature updates are turned off.', 'fckmaleware' ) );
+			return;
 		}
+		$result = $this->check();
+		Plugin::record_task( 'signatures', 'error' === $result['status'] ? 'error' : 'ok', 'error' === $result['status'] ? (string) ( $result['message'] ?? '' ) : (string) ( $result['version'] ?? '' ) );
 	}
 
 	/**
@@ -242,6 +245,34 @@ final class SignatureUpdater {
 	 *
 	 * @return string|\WP_Error Version now active.
 	 */
+	/**
+	 * Re-hash every downloaded database against the hash recorded when its
+	 * signed manifest was verified, and the bundled one against its own JSON.
+	 *
+	 * @return array<int, array{version: string, ok: bool, detail: string}>
+	 */
+	public function verify(): array {
+		$out = array();
+		foreach ( $this->state()['installed'] as $entry ) {
+			$path = $this->dir() . '/' . basename( (string) $entry['file'] );
+			$raw  = is_readable( $path ) ? (string) file_get_contents( $path ) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions
+			$ok   = '' !== $raw && hash_equals( (string) $entry['sha256'], hash( 'sha256', $raw ) );
+			$out[] = array(
+				'version' => (string) $entry['version'],
+				'ok'      => $ok,
+				'detail'  => $ok ? __( 'SHA-256 matches the signed manifest.', 'fckmaleware' ) : ( '' === $raw ? __( 'File missing or unreadable.', 'fckmaleware' ) : __( 'SHA-256 does not match the signed manifest.', 'fckmaleware' ) ),
+			);
+		}
+		$bundled = json_decode( (string) file_get_contents( self::bundled_path() ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		$out[]   = array(
+			'version' => self::bundled_version(),
+			'ok'      => is_array( $bundled ) && ! empty( $bundled['signatures'] ),
+			'detail'  => __( 'Bundled with the plugin; covered by the plugin\'s own integrity manifest.', 'fckmaleware' ),
+		);
+		ActivityLog::log( 'signatures.verified', __( 'Signature databases verified.', 'fckmaleware' ), array( 'results' => $out ), in_array( false, array_column( $out, 'ok' ), true ) ? 'warning' : 'info' );
+		return $out;
+	}
+
 	public function rollback() {
 		$state = $this->state();
 		if ( ! $state['installed'] ) {

@@ -9,8 +9,12 @@ namespace Fckmaleware;
 
 final class Schema {
 
-	/** 1 = 0.1/0.2 findings table; 2 = findings v2, file cache, baselines, activity log; 3 = AI review column. */
-	public const VERSION = '3';
+	/**
+	 * 1 = 0.1/0.2 findings table; 2 = findings v2, file cache, baselines,
+	 * activity log; 3 = AI review column; 4 = indexes for filtered finding
+	 * lists and bulk jobs (status + severity, detection date, quarantine key).
+	 */
+	public const VERSION = '4';
 
 	public const OPTION = 'fckmw_db_version';
 
@@ -64,6 +68,9 @@ final class Schema {
 				updated_at datetime NOT NULL,
 				PRIMARY KEY  (id),
 				KEY status (status),
+				KEY status_severity (status,severity),
+				KEY detected_at (detected_at),
+				KEY quarantine_key (quarantine_key),
 				KEY source (source),
 				KEY file (file(191)),
 				KEY object (object_type,object_ref)

@@ -39,7 +39,18 @@ if ( ! function_exists( 'wp_parse_url' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_salt' ) ) {
+	function wp_salt( $scheme = 'auth' ) {
+		return 'unit-test-salt-' . $scheme;
+	}
+}
+
 require FCKMW_ROOT . '/includes/class-signatures.php';
+require FCKMW_ROOT . '/includes/class-settings.php';
+require FCKMW_ROOT . '/includes/class-secrets.php';
+require FCKMW_ROOT . '/includes/class-findings.php';
+require FCKMW_ROOT . '/includes/class-monitor.php';
+require FCKMW_ROOT . '/includes/admin/class-actions.php';
 require FCKMW_ROOT . '/includes/class-feed.php';
 require FCKMW_ROOT . '/includes/class-notifier.php';
 require FCKMW_ROOT . '/includes/ai/class-redactor.php';

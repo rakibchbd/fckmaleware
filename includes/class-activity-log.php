@@ -12,9 +12,8 @@ final class ActivityLog {
 
 	public const SEVERITIES = array( 'info', 'notice', 'warning', 'critical' );
 
-	/** Keep at most this many days and rows. */
-	private const RETENTION_DAYS = 180;
-	private const MAX_ROWS       = 20000;
+	/** Keep at most this many rows; the age limit is the log_retention_days setting. */
+	private const MAX_ROWS = 20000;
 
 	public static function table(): string {
 		return Schema::table( 'events' );
@@ -49,7 +48,8 @@ final class ActivityLog {
 	}
 
 	/**
-	 * @param array{type?: string, severity?: string, since?: int} $filters type may end in "." to match a prefix.
+	 * @param array{type?: string, types?: string[], severity?: string, since?: int, until?: int, user?: int, search?: string, failed?: bool} $filters
+	 *        type may end in "." to match a prefix; types is a list of such types; failed matches *.failed and *.error events.
 	 * @return array{rows: array<int, array>, total: int}
 	 */
 	public static function query( array $filters = array(), int $page = 1, int $per_page = 50 ): array {
@@ -66,6 +66,30 @@ final class ActivityLog {
 				$where[] = 'type = %s';
 				$args[]  = $filters['type'];
 			}
+		}
+		if ( ! empty( $filters['types'] ) ) {
+			$any = array();
+			foreach ( (array) $filters['types'] as $type ) {
+				$any[]  = 'type LIKE %s';
+				$args[] = '.' === substr( $type, -1 ) ? $wpdb->esc_like( $type ) . '%' : $wpdb->esc_like( $type );
+			}
+			$where[] = '(' . implode( ' OR ', $any ) . ')';
+		}
+		if ( ! empty( $filters['failed'] ) ) {
+			$where[] = '(type LIKE %s OR type LIKE %s OR type LIKE %s)';
+			array_push( $args, '%' . $wpdb->esc_like( '.failed' ), '%' . $wpdb->esc_like( '.error' ), '%' . $wpdb->esc_like( '.corrupt' ) );
+		}
+		if ( ! empty( $filters['until'] ) ) {
+			$where[] = 'created_at <= %d';
+			$args[]  = (int) $filters['until'];
+		}
+		if ( isset( $filters['user'] ) && '' !== (string) $filters['user'] ) {
+			$where[] = 'user_id = %d';
+			$args[]  = (int) $filters['user'];
+		}
+		if ( ! empty( $filters['search'] ) ) {
+			$where[] = 'message LIKE %s';
+			$args[]  = '%' . $wpdb->esc_like( (string) $filters['search'] ) . '%';
 		}
 		if ( ! empty( $filters['severity'] ) && in_array( $filters['severity'], self::SEVERITIES, true ) ) {
 			$where[] = 'severity = %s';
@@ -106,7 +130,8 @@ final class ActivityLog {
 		global $wpdb;
 		$table = self::table();
 		// phpcs:disable WordPress.DB
-		$wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE created_at < %d", time() - self::RETENTION_DAYS * DAY_IN_SECONDS ) );
+		$days = max( 30, (int) Settings::get( 'log_retention_days' ) );
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE created_at < %d", time() - $days * DAY_IN_SECONDS ) );
 		$cutoff = (int) $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$table} ORDER BY id DESC LIMIT 1 OFFSET %d", self::MAX_ROWS ) );
 		if ( $cutoff ) {
 			$wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE id <= %d", $cutoff ) );

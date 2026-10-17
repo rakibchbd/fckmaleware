@@ -4,6 +4,10 @@
  * the uploads .htaccess rule and the private data folder (including
  * quarantined files and downloaded signatures).
  *
+ * When "Keep data when the plugin is deleted" is on, only the scheduled
+ * events and the uploads rule are removed, so a reinstall picks up the
+ * findings, quarantine, logs and settings again.
+ *
  * @package Fckmaleware
  */
 
@@ -11,8 +15,31 @@ defined( 'WP_UNINSTALL_PLUGIN' ) || exit;
 
 global $wpdb;
 
+$fckmw_settings = is_multisite() ? get_site_option( 'fckmw_settings', array() ) : get_option( 'fckmw_settings', array() );
+$fckmw_keep     = is_array( $fckmw_settings ) && ! empty( $fckmw_settings['keep_data_on_uninstall'] );
+
 // Read the data folder name before its option is deleted.
 $fckmw_dir_name = is_multisite() ? get_site_option( 'fckmw_data_dir', '' ) : get_option( 'fckmw_data_dir', '' );
+
+if ( $fckmw_keep ) {
+	$fckmw_site_ids = is_multisite() ? get_sites( array( 'fields' => 'ids', 'number' => 0 ) ) : array( get_current_blog_id() );
+	foreach ( $fckmw_site_ids as $fckmw_site_id ) {
+		if ( is_multisite() ) {
+			switch_to_blog( $fckmw_site_id );
+		}
+		foreach ( (array) _get_cron_array() as $fckmw_hooks ) {
+			foreach ( array_keys( (array) $fckmw_hooks ) as $fckmw_hook ) {
+				if ( 0 === strpos( (string) $fckmw_hook, 'fckmw_' ) ) {
+					wp_unschedule_hook( $fckmw_hook );
+				}
+			}
+		}
+		if ( is_multisite() ) {
+			restore_current_blog();
+		}
+	}
+	return;
+}
 
 // phpcs:disable WordPress.DB
 foreach ( array( 'findings', 'files', 'baseline', 'events' ) as $fckmw_table ) {
@@ -64,6 +91,21 @@ $fckmw_dirs = array( $fckmw_base . 'fckmaleware' );
 if ( is_string( $fckmw_dir_name ) && preg_match( '/^fckmaleware-[a-z0-9]{20}$/', $fckmw_dir_name ) ) {
 	$fckmw_dirs[] = $fckmw_base . $fckmw_dir_name;
 }
+// A data folder set with FCKMW_DATA_DIR may sit next to other files of the
+// account: only FCK Malware's own entries inside it are removed.
+if ( defined( 'FCKMW_DATA_DIR' ) && is_string( FCKMW_DATA_DIR ) && '' !== FCKMW_DATA_DIR ) {
+	$fckmw_custom = untrailingslashit( wp_normalize_path( FCKMW_DATA_DIR ) );
+	if ( is_dir( $fckmw_custom ) && ! is_link( $fckmw_custom ) && ! preg_match( '#(^|/)\.\.?(/|$)#', $fckmw_custom ) ) {
+		foreach ( array( 'quarantine', 'signatures', 'backups' ) as $fckmw_sub ) {
+			$fckmw_dirs[] = $fckmw_custom . '/' . $fckmw_sub;
+		}
+		foreach ( array( 'index.php', '.htaccess', 'web.config', 'scan-files.txt' ) as $fckmw_file ) {
+			if ( is_file( $fckmw_custom . '/' . $fckmw_file ) ) {
+				unlink( $fckmw_custom . '/' . $fckmw_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+			}
+		}
+	}
+}
 foreach ( $fckmw_dirs as $fckmw_data ) {
 	if ( ! is_dir( $fckmw_data ) || is_link( $fckmw_data ) ) {
 		continue;
@@ -77,6 +119,9 @@ foreach ( $fckmw_dirs as $fckmw_data ) {
 		$fckmw_item->isDir() && ! $fckmw_item->isLink() ? rmdir( $fckmw_item->getPathname() ) : unlink( $fckmw_item->getPathname() ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 	}
 	rmdir( $fckmw_data ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+}
+if ( isset( $fckmw_custom ) && is_dir( $fckmw_custom ) && 2 === count( (array) scandir( $fckmw_custom ) ) ) {
+	rmdir( $fckmw_custom ); // phpcs:ignore WordPress.WP.AlternativeFunctions -- only when empty.
 }
 
 // The update checker may re-cache release data later in this request; drop it last.

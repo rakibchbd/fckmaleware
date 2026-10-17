@@ -37,6 +37,17 @@ final class ThreatIntel extends Page {
 		echo '<p class="description">' . esc_html__( 'Not integrated: WPScan and Patchstack vulnerability data (commercial licences) and Imunify360\'s own signatures (proprietary). Imunify360 results can be imported from the agent on this server instead, see Integrations.', 'fckmaleware' ) . '</p>';
 		Ui::card_end();
 
+		$updates = $this->plugin->signature_updater()->state();
+		$imunify = $this->plugin->integrations()->summary();
+		Ui::card_start( __( 'Intelligence sources on this site', 'fckmaleware' ), '', __( 'Only sources that are actually implemented are listed. Each indicator in the database keeps its source and licence.', 'fckmaleware' ) );
+		echo '<div class="fckmw-table-wrap"><table class="fckmw-table"><thead><tr><th scope="col">' . esc_html__( 'Source', 'fckmaleware' ) . '</th><th scope="col">' . esc_html__( 'Status', 'fckmaleware' ) . '</th><th scope="col">' . esc_html__( 'Last synchronisation', 'fckmaleware' ) . '</th><th scope="col">' . esc_html__( 'Verification', 'fckmaleware' ) . '</th></tr></thead><tbody>';
+		echo '<tr><td><strong>' . esc_html__( 'FCK Malware signed feed', 'fckmaleware' ) . '</strong><span class="fckmw-sub">' . esc_html( \Fckmaleware\SignatureUpdater::feed_url() ) . '</span></td><td>' . ( Settings::get( 'signature_updates' ) ? ( $updates['last_error'] ? Ui::status( __( 'Last check failed', 'fckmaleware' ), 'warn' ) : Ui::status( __( 'Active', 'fckmaleware' ), 'good' ) ) : Ui::status( __( 'Off', 'fckmaleware' ), 'off' ) ) . '</td><td>' . Ui::when( (int) $updates['last_success'] ) . '</td><td>' . esc_html__( 'Ed25519 signature, SHA-256, expiry and anti-replay', 'fckmaleware' ) . '</td></tr>'; // phpcs:ignore WordPress.Security.EscapeOutput
+		/* translators: %s: version */
+		echo '<tr><td><strong>' . esc_html__( 'Bundled database', 'fckmaleware' ) . '</strong><span class="fckmw-sub">' . esc_html( sprintf( __( 'Shipped with FCK Malware %s', 'fckmaleware' ), FCKMW_VERSION ) ) . '</span></td><td>' . Ui::status( __( 'Always available', 'fckmaleware' ), 'good' ) . '</td><td>—</td><td>' . esc_html__( 'Covered by the plugin\'s integrity manifest', 'fckmaleware' ) . '</td></tr>'; // phpcs:ignore WordPress.Security.EscapeOutput
+		echo '<tr><td><strong>' . esc_html__( 'Server scanner results', 'fckmaleware' ) . '</strong><span class="fckmw-sub">' . esc_html__( 'Imunify360 / ImunifyAV malicious-file list', 'fckmaleware' ) . '</span></td><td>' . Ui::status( $imunify['label'], $imunify['tone'] ) . '</td><td>' . Ui::when( (int) \Fckmaleware\Store::get( 'fckmw_imunify_last_sync', 0 ) ) . '</td><td>' . esc_html__( 'Read from the local agent; file paths limited to this site', 'fckmaleware' ) . '</td></tr>'; // phpcs:ignore WordPress.Security.EscapeOutput
+		echo '</tbody></table></div>';
+		Ui::card_end();
+
 		echo '<div class="fckmw-grid">';
 		Ui::card_start( __( 'Sources in the active database', 'fckmaleware' ) );
 		$sources = array();
@@ -45,7 +56,7 @@ final class ThreatIntel extends Page {
 			$sources[ $key ] = ( $sources[ $key ] ?? 0 ) + 1;
 		}
 		arsort( $sources );
-		echo '<table class="widefat striped fckmw-table"><tbody>';
+		echo '<table class="fckmw-table"><tbody>';
 		foreach ( $sources as $source => $count ) {
 			echo '<tr><td>' . esc_html( $source ) . '</td><td class="fckmw-num">' . (int) $count . '</td></tr>';
 		}
@@ -67,7 +78,7 @@ final class ThreatIntel extends Page {
 		echo '</div>';
 
 		if ( ! Settings::get( 'signature_updates' ) ) {
-			echo '<div class="notice notice-warning inline"><p>' . esc_html__( 'Signature updates are off, so new rules do not reach this site. Turn them on in Settings.', 'fckmaleware' ) . '</p></div>';
+			Ui::callout( __( 'Signature updates are off, so new rules do not reach this site. Turn them on in Settings.', 'fckmaleware' ), 'warning' );
 		}
 		Ui::footer();
 	}

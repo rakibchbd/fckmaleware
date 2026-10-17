@@ -208,6 +208,7 @@ final class DbScanner {
 		$state['resolved'] = $resolved;
 		unset( $state['tables'] );
 		Store::set( 'fckmw_last_db_scan', $state );
+		ScanHistory::add( self::history_entry( $state ) );
 		ActivityLog::log(
 			'dbscan.complete',
 			sprintf( /* translators: 1: rows, 2: detections, 3: new */ __( 'Database scan complete: %1$d candidate rows inspected, %2$d detections, %3$d new.', 'fckmaleware' ), $state['rows'], $state['found'], $state['new'] ),
@@ -216,6 +217,39 @@ final class DbScanner {
 		);
 		do_action( 'fckmw_db_scan_complete', $state );
 		return $state;
+	}
+
+	/** Stop a running database scan; findings recorded so far are kept. */
+	public function cancel(): array {
+		$state = $this->state();
+		if ( 'running' === $state['status'] ) {
+			$state['status']   = 'cancelled';
+			$state['finished'] = time();
+			unset( $state['tables'] );
+			Store::set( self::STATE_OPTION, $state );
+			ScanHistory::add( self::history_entry( $state ) );
+			ActivityLog::log( 'dbscan.cancelled', __( 'Database scan cancelled.', 'fckmaleware' ), array( 'scan' => $state['id'] ?? '' ) );
+		}
+		return $state;
+	}
+
+	private static function history_entry( array $state ): array {
+		return array(
+			'kind'     => 'database',
+			'id'       => (string) ( $state['id'] ?? '' ),
+			'mode'     => 'database',
+			'trigger'  => (string) ( $state['trigger'] ?? '' ),
+			'status'   => (string) $state['status'],
+			'files'    => (int) ( $state['rows'] ?? 0 ),
+			'total'    => (int) ( $state['rows'] ?? 0 ),
+			'skipped'  => 0,
+			'found'    => (int) ( $state['found'] ?? 0 ),
+			'new'      => (int) ( $state['new'] ?? 0 ),
+			'errors'   => 0,
+			'large'    => 0,
+			'started'  => (int) ( $state['started'] ?? 0 ),
+			'finished' => (int) ( $state['finished'] ?? time() ),
+		);
 	}
 
 	/**

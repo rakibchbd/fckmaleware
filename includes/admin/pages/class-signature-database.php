@@ -20,7 +20,7 @@ final class SignatureDatabase extends Page {
 		$updater = $this->plugin->signature_updater();
 		$state   = $updater->state();
 
-		Ui::header( $title, __( 'Signatures are the plugin\'s own rules, written and tested against clean WordPress code before release. Updates are downloaded only when signed with an FCK Malware key built into the plugin.', 'fckmaleware' ) );
+		Ui::header( $title, __( 'Signatures are the plugin\'s own rules, written and tested against clean WordPress code before release. Updates are downloaded only when signed with an FCK Malware key built into the plugin (Ed25519), checked for expiry, replay and hash, and installed atomically; a failed update keeps the last good database.', 'fckmaleware' ) );
 
 		echo '<div class="fckmw-stats">';
 		Ui::stat( __( 'Active version', 'fckmaleware' ), $sigs->version(), 'neutral', $state['installed'] ? __( 'downloaded update', 'fckmaleware' ) : __( 'bundled with the plugin', 'fckmaleware' ) );
@@ -43,6 +43,7 @@ final class SignatureDatabase extends Page {
 		}
 		echo '</dl><div class="fckmw-actions">';
 		Ui::action_button( 'signatures', __( 'Check for updates now', 'fckmaleware' ), array( 'op' => 'update', 'return' => 'signatures' ), 'button button-primary' );
+		Ui::action_button( 'signatures', __( 'Verify integrity', 'fckmaleware' ), array( 'op' => 'verify', 'return' => 'signatures' ) );
 		if ( $state['installed'] ) {
 			Ui::action_button( 'signatures', __( 'Roll back to previous version', 'fckmaleware' ), array( 'op' => 'rollback', 'return' => 'signatures' ), 'button', __( 'Remove the newest downloaded signature database and use the previous one?', 'fckmaleware' ) );
 		}
@@ -52,6 +53,20 @@ final class SignatureDatabase extends Page {
 			foreach ( array_reverse( $state['installed'] ) as $entry ) {
 				/* translators: 1: version, 2: count, 3: date, 4: key */
 				echo '<li>' . esc_html( sprintf( __( '%1$s: %2$d signatures, installed %3$s, signed by %4$s', 'fckmaleware' ), $entry['version'], $entry['count'], Ui::datetime( (int) $entry['installed'] ), $entry['key'] ) ) . '</li>';
+			}
+			echo '</ul>';
+		}
+		Ui::card_end();
+
+		Ui::card_start( __( 'Update history', 'fckmaleware' ) );
+		$history = \Fckmaleware\ActivityLog::query( array( 'type' => 'signatures.' ), 1, 10 )['rows'];
+		if ( ! $history ) {
+			Ui::empty_state( __( 'No update activity yet', 'fckmaleware' ), __( 'Checks, installs, rollbacks and failed downloads are listed here.', 'fckmaleware' ), '', 'database' );
+		} else {
+			echo '<ul class="fckmw-events">';
+			foreach ( $history as $row ) {
+				list( $icon, $tone ) = Overview::event_style( (string) $row['type'], (string) $row['severity'] );
+				printf( '<li><span class="fckmw-event-icon fckmw-tone-%1$s"><span class="dashicons dashicons-%2$s" aria-hidden="true"></span></span><span class="fckmw-event-text">%3$s</span><span class="fckmw-event-time">%4$s</span></li>', esc_attr( $tone ), esc_attr( $icon ), esc_html( (string) $row['message'] ), Ui::when( (int) $row['created_at'] ) ); // phpcs:ignore WordPress.Security.EscapeOutput
 			}
 			echo '</ul>';
 		}
@@ -90,7 +105,9 @@ final class SignatureDatabase extends Page {
 		$paged = max( 1, absint( self::query( 'paged', 1 ) ) );
 
 		Ui::card_start( __( 'Rules', 'fckmaleware' ) );
-		echo '<form method="get" class="fckmw-filters"><input type="hidden" name="page" value="' . esc_attr( Ui::SLUG . '-signatures' ) . '"><label class="screen-reader-text" for="fckmw-sig-search">' . esc_html__( 'Search signatures', 'fckmaleware' ) . '</label><input type="search" id="fckmw-sig-search" name="s" value="' . esc_attr( $search ) . '"> <button class="button">' . esc_html__( 'Search', 'fckmaleware' ) . '</button></form>';
+		echo '<form method="get" class="fckmw-filters">';
+		Ui::location_fields( 'signatures' );
+		echo '<label class="screen-reader-text" for="fckmw-sig-search">' . esc_html__( 'Search signatures', 'fckmaleware' ) . '</label><input type="search" id="fckmw-sig-search" name="s" value="' . esc_attr( $search ) . '"> <button class="button">' . esc_html__( 'Search', 'fckmaleware' ) . '</button></form>';
 		echo '<table class="widefat striped fckmw-table"><thead><tr><th>' . esc_html__( 'ID', 'fckmaleware' ) . '</th><th>' . esc_html__( 'Name', 'fckmaleware' ) . '</th><th>' . esc_html__( 'Family', 'fckmaleware' ) . '</th><th>' . esc_html__( 'Severity', 'fckmaleware' ) . '</th><th>' . esc_html__( 'Confidence', 'fckmaleware' ) . '</th><th>' . esc_html__( 'Applies to', 'fckmaleware' ) . '</th><th>' . esc_html__( 'Source', 'fckmaleware' ) . '</th></tr></thead><tbody>';
 		foreach ( array_slice( $all, ( $paged - 1 ) * self::PER_PAGE, self::PER_PAGE ) as $sig ) {
 			echo '<tr><td><code>' . esc_html( $sig['id'] ) . '</code></td><td>' . esc_html( $sig['name'] ) . ( $sig['description'] ? '<br><span class="description">' . esc_html( $sig['description'] ) . '</span>' : '' ) . '</td><td>' . esc_html( $sig['family'] ) . '</td><td>' . Ui::severity( $sig['severity'] ) . '</td><td class="fckmw-num">' . (int) $sig['confidence'] . '</td><td>' . esc_html( implode( ', ', $sig['targets'] ) . ' · ' . $sig['technique'] ) . '</td><td>' . esc_html( $sig['source'] . ( $sig['license'] ? ' (' . $sig['license'] . ')' : '' ) ) . '</td></tr>'; // phpcs:ignore WordPress.Security.EscapeOutput
