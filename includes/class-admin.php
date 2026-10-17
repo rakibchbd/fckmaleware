@@ -145,27 +145,14 @@ final class Admin {
 		if ( 'restore' === $command ) {
 			$result = $this->plugin->quarantine()->restore( $key );
 			if ( true === $result ) {
-				$this->release_findings( $key, 'open' );
+				$this->plugin->release_quarantine_findings( $key, 'open' );
 			}
 			$this->redirect_with( $result, __( 'File restored to its original location.', 'fckmaleware' ), 'quarantine' );
 		}
 
 		$this->plugin->quarantine()->purge( $key );
-		$this->release_findings( $key, 'resolved' );
+		$this->plugin->release_quarantine_findings( $key, 'resolved' );
 		$this->redirect_with( true, __( 'Quarantined file deleted.', 'fckmaleware' ), 'quarantine' );
-	}
-
-	private function release_findings( string $key, string $status ): void {
-		global $wpdb;
-		$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			Findings::table(),
-			array(
-				'status'         => $status,
-				'quarantine_key' => '',
-				'updated_at'     => current_time( 'mysql', true ),
-			),
-			array( 'quarantine_key' => $key )
-		);
 	}
 
 	public function handle_settings(): void {

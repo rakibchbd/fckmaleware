@@ -205,10 +205,33 @@ final class Scanner {
 
 	/** @return int|\WP_Error Number of files queued. */
 	private function build_file_list() {
+		$handle = fopen( Paths::data_dir() . '/' . self::LIST_FILE, 'w' ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		if ( false === $handle ) {
+			return new \WP_Error( 'fckmw_storage', __( 'Could not write the scan file list.', 'fckmaleware' ) );
+		}
+		$count = 0;
+		foreach ( self::files( '', (bool) Settings::get( 'scan_images' ) ) as $relative ) {
+			fwrite( $handle, $relative . "\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+			$count++;
+		}
+		fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		return $count;
+	}
+
+	/**
+	 * Walk the site (or a sub-directory of it) and yield the relative path of
+	 * every file the signatures can handle, honouring the size limit and exclusions.
+	 *
+	 * @return \Generator<int, string>
+	 */
+	public static function files( string $subdir = '', bool $images = false ): \Generator {
 		$root      = Paths::root();
+		$start     = '' === $subdir ? $root : Paths::resolve( $subdir );
 		$max_bytes = (int) Settings::get( 'max_file_size_mb' ) * MB_IN_BYTES;
-		$images    = (bool) Settings::get( 'scan_images' );
-		$exclude   = array_filter(
+		if ( is_wp_error( $start ) || ! is_dir( $start ) ) {
+			return;
+		}
+		$exclude = array_filter(
 			array_map(
 				static function ( string $dir ) {
 					$real = realpath( $dir );
@@ -223,12 +246,7 @@ final class Scanner {
 			)
 		);
 
-		$handle = fopen( Paths::data_dir() . '/' . self::LIST_FILE, 'w' ); // phpcs:ignore WordPress.WP.AlternativeFunctions
-		if ( false === $handle ) {
-			return new \WP_Error( 'fckmw_storage', __( 'Could not write the scan file list.', 'fckmaleware' ) );
-		}
-
-		$directory = new \RecursiveDirectoryIterator( $root, \FilesystemIterator::SKIP_DOTS );
+		$directory = new \RecursiveDirectoryIterator( $start, \FilesystemIterator::SKIP_DOTS );
 		$filter    = new \RecursiveCallbackFilterIterator(
 			$directory,
 			static function ( \SplFileInfo $item ) use ( $exclude ): bool {
@@ -243,7 +261,6 @@ final class Scanner {
 		);
 		$iterator  = new \RecursiveIteratorIterator( $filter, \RecursiveIteratorIterator::LEAVES_ONLY, \RecursiveIteratorIterator::CATCH_GET_CHILD );
 
-		$count = 0;
 		foreach ( $iterator as $item ) {
 			/** @var \SplFileInfo $item */
 			if ( $item->isLink() || ! $item->isFile() || $item->getSize() > $max_bytes ) {
@@ -256,12 +273,8 @@ final class Scanner {
 			if ( null === Signatures::file_type( $relative, $images ) ) {
 				continue;
 			}
-			fwrite( $handle, $relative . "\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions
-			$count++;
+			yield $relative;
 		}
-		fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions
-
-		return $count;
 	}
 
 	private function fetch_core_checksums(): bool {

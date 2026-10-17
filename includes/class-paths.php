@@ -36,7 +36,7 @@ final class Paths {
 			return new \WP_Error( 'fckmw_missing', __( 'File no longer exists.', 'fckmaleware' ) );
 		}
 		$real = wp_normalize_path( $real );
-		if ( 0 !== strpos( $real, self::root() ) ) {
+		if ( 0 !== strpos( trailingslashit( $real ), self::root() ) ) {
 			return new \WP_Error( 'fckmw_outside', __( 'File is outside the WordPress directory.', 'fckmaleware' ) );
 		}
 		return $real;

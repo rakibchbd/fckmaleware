@@ -43,6 +43,8 @@ final class Plugin {
 		add_action( self::CRON_CONTINUE, array( $this, 'continue_scan' ) );
 		add_action( 'fckmw_scan_complete', array( $this, 'on_scan_complete' ) );
 
+		( new Updater() )->register();
+
 		if ( is_admin() ) {
 			( new Admin( $this ) )->register();
 		}
@@ -103,12 +105,35 @@ final class Plugin {
 		if ( ! $finding || 'open' !== $finding['status'] ) {
 			return new \WP_Error( 'fckmw_unknown', __( 'Finding not found or not open.', 'fckmaleware' ) );
 		}
-		$key = $this->quarantine()->isolate( $finding['file'], $this->is_foreign_core_file( $finding['file'] ) );
-		if ( is_wp_error( $key ) ) {
-			return $key;
+		$key = $this->quarantine_path( $finding['file'] );
+		return is_wp_error( $key ) ? $key : true;
+	}
+
+	/**
+	 * Quarantine a file by its path relative to the site root.
+	 *
+	 * @return string|\WP_Error Quarantine key.
+	 */
+	public function quarantine_path( string $file ) {
+		$key = $this->quarantine()->isolate( $file, $this->is_foreign_core_file( $file ) );
+		if ( ! is_wp_error( $key ) ) {
+			$this->findings()->set_status_for_file( $file, 'quarantined', $key );
 		}
-		$this->findings()->set_status_for_file( $finding['file'], 'quarantined', $key );
-		return true;
+		return $key;
+	}
+
+	/** Move findings linked to a quarantine entry to a new status once the entry is restored or deleted. */
+	public function release_quarantine_findings( string $key, string $status ): void {
+		global $wpdb;
+		$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			Findings::table(),
+			array(
+				'status'         => $status,
+				'quarantine_key' => '',
+				'updated_at'     => current_time( 'mysql', true ),
+			),
+			array( 'quarantine_key' => $key )
+		);
 	}
 
 	/**

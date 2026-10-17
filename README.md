@@ -15,6 +15,25 @@ There's also a location rule (PHP files inside `wp-content/uploads`) and an opti
 
 Copy this repository into `wp-content/plugins/fckmaleware/` and activate **FckMaleware**. Requires WordPress 5.8+ and PHP 7.4+.
 
+## Updates
+
+Installed sites update straight from this GitHub repository. Updates appear on *Dashboard → Updates* and the Plugins screen like any wordpress.org plugin, with "View details", one-click update and the auto-update toggle.
+
+To ship an update:
+
+1. Bump the version in `fckmaleware.php`, in **both** the `Version:` header and `FCKMW_VERSION`.
+2. Merge to `main`.
+
+The **Release** workflow (`.github/workflows/release.yml`) then:
+
+- runs the tests;
+- builds `fckmaleware.zip` (without `tests/`, `tools/` and `.github/`, see `.distignore`);
+- publishes a GitHub release `v<version>` with generated notes.
+
+Pushes that don't change the version publish nothing.
+
+Sites check the latest release every 6 hours. *Check again* on Dashboard → Updates checks immediately. If a release has no `fckmaleware.zip` asset, the source zipball is used and its folder is renamed to match the installed plugin. Releases marked as drafts or pre-releases are never offered.
+
 ## Using it
 
 **Admin → FckMaleware**

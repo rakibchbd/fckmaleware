@@ -17,6 +17,7 @@ foreach ( array( 'fckmw_settings', 'fckmw_db_version', 'fckmw_scan_state', 'fckm
 
 wp_clear_scheduled_hook( 'fckmw_scheduled_scan' );
 wp_clear_scheduled_hook( 'fckmw_scan_continue' );
+delete_site_transient( 'fckmw_github_release' );
 
 $fckmw_uploads = wp_upload_dir( null, false );
 

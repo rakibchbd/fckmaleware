@@ -36,6 +36,19 @@ final class Quarantine {
 		if ( is_wp_error( $absolute ) ) {
 			return $absolute;
 		}
+		$key = $this->store( $relative, $absolute );
+		if ( is_wp_error( $key ) ) {
+			return $key;
+		}
+		if ( ! @unlink( $absolute ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions
+			$this->purge( $key );
+			return new \WP_Error( 'fckmw_unlink', __( 'Could not remove the original file (check file permissions).', 'fckmaleware' ) );
+		}
+		return $key;
+	}
+
+	/** @return string|\WP_Error */
+	private function store( string $relative, string $absolute ) {
 		if ( ! Paths::ensure_data_dir() ) {
 			return new \WP_Error( 'fckmw_storage', __( 'Could not create the quarantine directory.', 'fckmaleware' ) );
 		}
@@ -52,10 +65,6 @@ final class Quarantine {
 
 		if ( false === file_put_contents( $target, $encoded ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions
 			return new \WP_Error( 'fckmw_write', __( 'Could not write the quarantine copy.', 'fckmaleware' ) );
-		}
-		if ( ! @unlink( $absolute ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions
-			wp_delete_file( $target );
-			return new \WP_Error( 'fckmw_unlink', __( 'Could not remove the original file (check file permissions).', 'fckmaleware' ) );
 		}
 
 		$items         = $this->all();
