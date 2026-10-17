@@ -1,24 +1,140 @@
-.fckmw-cards { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
-.fckmw-card { background: #fff; border: 1px solid #c3c4c7; border-left-width: 4px; padding: 12px 16px; min-width: 120px; display: flex; flex-direction: column; }
-.fckmw-card .fckmw-num { font-size: 28px; font-weight: 600; line-height: 1.2; }
-.fckmw-sev-critical { border-left-color: #b32d2e; }
-.fckmw-sev-high { border-left-color: #d63638; }
-.fckmw-sev-medium { border-left-color: #dba617; }
-.fckmw-sev-low { border-left-color: #72aee6; }
+/* FCK Malware admin. Uses WordPress admin colours where possible so it follows the user's colour scheme. */
+.fckmw {
+	--fckmw-good: #00a32a;
+	--fckmw-warn: #dba617;
+	--fckmw-bad: #d63638;
+	--fckmw-critical: #8a2424;
+	--fckmw-neutral: #646970;
+	--fckmw-border: #dcdcde;
+	--fckmw-surface: #fff;
+	--fckmw-muted: #f6f7f7;
+	max-width: 1400px;
+}
 
-.fckmw-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; color: #fff; background: #72aee6; }
-.fckmw-badge.fckmw-sev-critical { background: #8a2424; }
-.fckmw-badge.fckmw-sev-high { background: #d63638; }
-.fckmw-badge.fckmw-sev-medium { background: #996800; }
+.fckmw-title { display: flex; align-items: center; gap: 8px; }
+.fckmw-title .dashicons { font-size: 28px; width: 28px; height: 28px; color: var(--wp-admin-theme-color, #2271b1); }
+.fckmw-intro { max-width: 900px; color: #50575e; font-size: 14px; }
 
-.fckmw-scan { background: #fff; border: 1px solid #c3c4c7; padding: 12px 16px; margin-bottom: 16px; }
-.fckmw-progress { height: 8px; background: #f0f0f1; border-radius: 4px; margin-top: 12px; overflow: hidden; }
-.fckmw-bar { height: 100%; width: 0; background: #2271b1; transition: width .2s; }
+/* Section navigation */
+.fckmw-nav { margin: 16px 20px 0 2px; }
+.fckmw-nav ul { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
+.fckmw-nav li { margin: 0; }
+.fckmw-nav a { display: block; padding: 6px 10px; border-radius: 4px; text-decoration: none; color: #1d2327; background: var(--fckmw-muted, #f6f7f7); border: 1px solid #dcdcde; font-size: 13px; }
+.fckmw-nav a:hover, .fckmw-nav a:focus { border-color: var(--wp-admin-theme-color, #2271b1); color: var(--wp-admin-theme-color, #2271b1); }
+.fckmw-nav a.is-current { background: var(--wp-admin-theme-color, #2271b1); border-color: var(--wp-admin-theme-color, #2271b1); color: #fff; }
 
-.fckmw-findings td { vertical-align: top; }
-.fckmw-findings code { word-break: break-all; }
-.fckmw-excerpt { max-width: 640px; white-space: pre-wrap; word-break: break-all; background: #f6f7f7; padding: 6px 8px; margin: 6px 0 0; font-size: 12px; }
-.fckmw-actions form { display: inline-block; margin: 0 4px 4px 0; }
-.fckmw-inline { display: inline-block; margin-right: 8px; }
-.fckmw-error { color: #b32d2e; }
-.fckmw [hidden] { display: none !important; }
+/* Layout */
+.fckmw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin: 16px 0; align-items: start; }
+.fckmw-grid-hero { grid-template-columns: minmax(280px, 1fr) minmax(340px, 2fr); }
+.fckmw-card { background: var(--fckmw-surface); border: 1px solid var(--fckmw-border); border-radius: 8px; padding: 16px 20px; margin: 16px 0; box-shadow: 0 1px 2px rgba(0, 0, 0, .04); }
+.fckmw-grid > .fckmw-card { margin: 0; }
+.fckmw-card-title { margin: 0 0 12px; font-size: 15px; }
+.fckmw-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: space-between; }
+.fckmw-toolbar .subsubsub { margin: 0; }
+
+/* Health score */
+.fckmw-score { display: flex; align-items: baseline; gap: 4px; }
+.fckmw-score span { font-size: 56px; font-weight: 600; line-height: 1; }
+.fckmw-score small { font-size: 18px; color: var(--fckmw-neutral); }
+.fckmw-health.fckmw-tone-good .fckmw-score span { color: var(--fckmw-good); }
+.fckmw-health.fckmw-tone-warn .fckmw-score span { color: #996800; }
+.fckmw-health.fckmw-tone-bad .fckmw-score span { color: var(--fckmw-bad); }
+.fckmw-deductions { margin: 12px 0 0; }
+.fckmw-deductions li { margin: 4px 0; }
+.fckmw-deductions strong { display: inline-block; min-width: 36px; color: var(--fckmw-bad); }
+
+/* Stat tiles */
+.fckmw-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin: 16px 0; }
+.fckmw-stat { display: flex; flex-direction: column; gap: 2px; padding: 14px 16px; background: var(--fckmw-surface); border: 1px solid var(--fckmw-border); border-left: 4px solid var(--fckmw-neutral); border-radius: 6px; text-decoration: none; color: inherit; }
+a.fckmw-stat:hover, a.fckmw-stat:focus { border-color: var(--wp-admin-theme-color, #2271b1); }
+.fckmw-stat-value { font-size: 24px; font-weight: 600; color: #1d2327; }
+.fckmw-stat-label { font-size: 13px; color: #3c434a; }
+.fckmw-stat-sub { font-size: 12px; color: var(--fckmw-neutral); }
+.fckmw-stat.fckmw-tone-good { border-left-color: var(--fckmw-good); }
+.fckmw-stat.fckmw-tone-warn { border-left-color: var(--fckmw-warn); }
+.fckmw-stat.fckmw-tone-bad { border-left-color: var(--fckmw-bad); }
+.fckmw-stats-compact { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+.fckmw-stats-compact .fckmw-stat-value { font-size: 18px; }
+
+/* Badges */
+.fckmw-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; line-height: 18px; font-weight: 500; background: #f0f0f1; color: #3c434a; white-space: nowrap; }
+.fckmw-badge.fckmw-tone-good { background: #edfaef; color: #00691c; }
+.fckmw-badge.fckmw-tone-warn { background: #fcf9e8; color: #8a6100; }
+.fckmw-badge.fckmw-tone-bad { background: #fcf0f1; color: #b32d2e; }
+.fckmw-badge.fckmw-tone-critical { background: var(--fckmw-critical); color: #fff; }
+
+/* Lists */
+.fckmw-checklist { margin: 0; columns: 2 220px; }
+.fckmw-checklist li { padding-left: 22px; position: relative; break-inside: avoid; }
+.fckmw-checklist li::before { position: absolute; left: 0; font-family: dashicons; font-size: 18px; line-height: 1; }
+.fckmw-checklist li.is-on::before { content: "\f147"; color: var(--fckmw-good); }
+.fckmw-checklist li.is-off::before { content: "\f335"; color: var(--fckmw-neutral); }
+.fckmw-list { list-style: disc; margin-left: 20px; }
+.fckmw-dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0 0 12px; }
+.fckmw-dl dt { font-weight: 600; }
+.fckmw-dl dd { margin: 0; word-break: break-word; }
+.fckmw-pipeline { counter-reset: step; list-style: none; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.fckmw-pipeline li { counter-increment: step; background: var(--fckmw-muted); border-radius: 6px; padding: 10px 12px; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.fckmw-pipeline li strong::before { content: counter(step) ". "; }
+
+/* Tables */
+.fckmw-table td, .fckmw-table th { vertical-align: top; }
+.fckmw-num { text-align: right; font-variant-numeric: tabular-nums; }
+.fckmw-nowrap { white-space: nowrap; }
+.fckmw-file code, .fckmw-mono { word-break: break-all; font-size: 12px; }
+.fckmw-findings .fckmw-detail-row td { border-top: 0; padding-top: 0; }
+.fckmw-findings details > summary { cursor: pointer; color: var(--wp-admin-theme-color, #2271b1); }
+.fckmw-detail { padding: 8px 0 12px; max-width: 1000px; }
+.fckmw-detail h4 { margin: 12px 0 4px; }
+.fckmw-pre { white-space: pre-wrap; }
+.fckmw-code { background: #1d2327; color: #f0f0f1; padding: 10px 12px; border-radius: 4px; overflow: auto; max-height: 320px; white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+.fckmw-ai { border-left: 3px solid var(--wp-admin-theme-color, #2271b1); padding-left: 12px; margin: 12px 0; }
+.fckmw-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; align-items: center; }
+.fckmw-inline { display: inline; margin: 0; }
+.fckmw-filters { margin: 8px 0 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; clear: both; }
+.fckmw-feedback { font-size: 12px; color: var(--fckmw-neutral); }
+
+/* Scanner */
+.fckmw-scan-form fieldset { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
+.fckmw-mode { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; padding: 10px 12px; border: 1px solid var(--fckmw-border); border-radius: 6px; cursor: pointer; }
+.fckmw-mode input { grid-row: span 2; margin-top: 2px; }
+.fckmw-mode span { color: #50575e; font-size: 12px; }
+.fckmw-mode:has(input:checked) { border-color: var(--wp-admin-theme-color, #2271b1); box-shadow: 0 0 0 1px var(--wp-admin-theme-color, #2271b1); }
+.fckmw-progress { height: 12px; background: #f0f0f1; border-radius: 6px; overflow: hidden; margin: 8px 0; }
+.fckmw-bar { height: 100%; width: 0; background: var(--wp-admin-theme-color, #2271b1); transition: width .3s ease; }
+.fckmw-bar-indeterminate { width: 30% !important; animation: fckmw-slide 1.2s ease-in-out infinite; }
+@keyframes fckmw-slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .fckmw-bar { transition: none; } .fckmw-bar-indeterminate { animation: none; width: 100% !important; opacity: .5; } }
+
+/* Hardening */
+.fckmw-rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; }
+.fckmw-rules .fckmw-card { margin: 0; }
+.fckmw-rule-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.fckmw-rule-head h3 { margin: 0; font-size: 14px; }
+.fckmw-rule-detail { font-weight: 500; }
+
+/* Reports */
+.fckmw-bars { margin: 0; }
+.fckmw-bars li { display: grid; grid-template-columns: 110px 1fr 48px; gap: 8px; align-items: center; margin: 6px 0; }
+.fckmw-bars-track { background: #f0f0f1; height: 10px; border-radius: 5px; overflow: hidden; }
+.fckmw-bars-fill { display: block; height: 100%; background: var(--wp-admin-theme-color, #2271b1); }
+
+/* Settings */
+.fckmw-field { margin: 12px 0; }
+.fckmw-field > label:first-child { display: inline-block; min-width: 260px; font-weight: 500; }
+.fckmw-field .description { margin: 4px 0 0; }
+.fckmw-switch span { font-weight: 500; }
+.fckmw-secret { word-break: break-all; }
+
+@media (max-width: 782px) {
+	.fckmw-grid, .fckmw-grid-hero, .fckmw-rules { grid-template-columns: 1fr; }
+	.fckmw-field > label:first-child { min-width: 0; display: block; margin-bottom: 4px; }
+	.fckmw-dl { grid-template-columns: 1fr; }
+}
+
+@media print {
+	#adminmenumain, #wpadminbar, .fckmw-nav, .fckmw-print, .fckmw-actions, form, .notice { display: none !important; }
+	#wpcontent { margin-left: 0 !important; }
+	.fckmw-card, .fckmw-stat { box-shadow: none; break-inside: avoid; }
+}
+.fckmw-card { overflow-x: auto; }

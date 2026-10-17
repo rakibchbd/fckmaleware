@@ -282,9 +282,6 @@ final class Scanner {
 			list( $dir, $recursive ) = $state['units'][ $state['unit'] ];
 			foreach ( self::files_in( $dir, $recursive, $exclude ) as $item ) {
 				/** @var \SplFileInfo $item */
-				if ( $item->getSize() > $max_bytes ) {
-					continue;
-				}
 				if ( $state['since'] && $item->getMTime() < $state['since'] ) {
 					continue;
 				}
@@ -294,6 +291,14 @@ final class Scanner {
 				}
 				$type = Signatures::file_type( $relative, $images );
 				if ( null === $type || ( $types && ! in_array( $type, $types, true ) ) ) {
+					continue;
+				}
+				if ( $item->getSize() > $max_bytes ) {
+					// Reported in the scan result so the gap in coverage is visible.
+					$state['too_large'] = ( $state['too_large'] ?? 0 ) + 1;
+					if ( count( $state['too_large_files'] ?? array() ) < 50 ) {
+						$state['too_large_files'][] = $relative;
+					}
 					continue;
 				}
 				fwrite( $handle, $relative . "\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions
@@ -377,6 +382,7 @@ final class Scanner {
 	private function scan_batch( array $state, float $deadline ): array {
 		$engine              = $this->engine( $state );
 		$state['sig_version'] = $engine->signatures()->version();
+		$errors_before       = $engine->signatures()->runtime_errors();
 		$use_cache           = in_array( $state['mode'], array( 'quick', 'standard' ), true );
 		$throttle            = (int) Settings::get( 'throttle_ms' ) * 1000;
 		$memory_limit        = self::memory_limit();
@@ -459,7 +465,7 @@ final class Scanner {
 					$this->cache->put_many( $updates );
 					fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 					$state['recording'] = $this->recording_of( $engine, $state );
-					return $state;
+					return self::note_pattern_errors( $state, $engine, $errors_before );
 				}
 			}
 			$this->cache->put_many( $updates );
@@ -467,6 +473,17 @@ final class Scanner {
 		}
 		fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 		$state['recording'] = $this->recording_of( $engine, $state );
+		return self::note_pattern_errors( $state, $engine, $errors_before );
+	}
+
+	/** Carry rules that hit the PCRE backtracking limit during this batch into the scan state. */
+	private static function note_pattern_errors( array $state, Engine $engine, array $before ): array {
+		foreach ( $engine->signatures()->runtime_errors() as $id => $count ) {
+			$delta = $count - ( $before[ $id ] ?? 0 );
+			if ( $delta > 0 ) {
+				$state['pattern_errors'][ $id ] = ( $state['pattern_errors'][ $id ] ?? 0 ) + $delta;
+			}
+		}
 		return $state;
 	}
 
@@ -592,6 +609,7 @@ final class Scanner {
 		$engine   = ( $this->engine_factory )( null, array( 'images' => true, 'record' => false ) );
 		$file     = FileContext::from_path( $relative, $absolute, Signatures::file_type( $relative, true ) ?? 'image' );
 		if ( $file->size > (int) Settings::get( 'max_file_size_mb' ) * MB_IN_BYTES ) {
+			ActivityLog::log( 'scan.too_large', sprintf( /* translators: 1: file, 2: size */ __( 'Not checked because it exceeds the size limit: %1$s (%2$s)', 'fckmaleware' ), $relative, size_format( $file->size ) ), array( 'file' => $relative, 'trigger' => $trigger ), 'notice' );
 			return array();
 		}
 		$detections = $engine->inspect( $file );

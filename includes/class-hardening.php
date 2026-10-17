@@ -265,7 +265,7 @@ final class Hardening {
 			Store::set( Settings::OPTION, $settings );
 		}
 		delete_site_transient( self::STATUS_CACHE );
-		ActivityLog::log( 'hardening.' . ( $on ? 'enabled' : 'disabled' ), sprintf( /* translators: %s: rule */ __( 'Hardening rule %1$s: %2$s', 'fckmaleware' ), $on ? __( 'enabled', 'fckmaleware' ) : __( 'disabled', 'fckmaleware' ), $catalog[ $id ]['title'] ), array( 'rule' => $id ), 'notice' );
+		ActivityLog::log( 'hardening.' . ( $on ? 'enabled' : 'disabled' ), sprintf( /* translators: 1: enabled/disabled, 2: rule */ __( 'Hardening rule %1$s: %2$s', 'fckmaleware' ), $on ? __( 'enabled', 'fckmaleware' ) : __( 'disabled', 'fckmaleware' ), $catalog[ $id ]['title'] ), array( 'rule' => $id ), 'notice' );
 		return true;
 	}
 
@@ -312,6 +312,15 @@ final class Hardening {
 			}
 		}
 		set_site_transient( self::STATUS_CACHE, $out, 10 * MINUTE_IN_SECONDS );
+
+		// Kept beyond the cache lifetime as input for the health score.
+		$summary = array( 'pass' => 0, 'warn' => 0, 'fail' => 0, 'time' => time() );
+		foreach ( $out as $item ) {
+			if ( isset( $summary[ $item['state'] ] ) ) {
+				$summary[ $item['state'] ]++;
+			}
+		}
+		Store::set( 'fckmw_hardening_summary', $summary );
 		return $out;
 	}
 
