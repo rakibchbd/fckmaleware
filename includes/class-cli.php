@@ -289,6 +289,50 @@ final class CLI {
 	}
 
 	/**
+	 * Manage signed signature-database updates.
+	 *
+	 * ## OPTIONS
+	 *
+	 * <action>
+	 * : status, update or rollback.
+	 * ---
+	 * options:
+	 *   - status
+	 *   - update
+	 *   - rollback
+	 * ---
+	 *
+	 * @subcommand signature-updates
+	 * @when after_wp_load
+	 */
+	public function signature_updates( array $args ): void {
+		$updater = $this->plugin->signature_updater();
+		switch ( $args[0] ) {
+			case 'update':
+				$result = $updater->check();
+				if ( 'error' === $result['status'] ) {
+					\WP_CLI::error( $result['message'] );
+				}
+				\WP_CLI::success( 'updated' === $result['status'] ? "Updated to {$result['version']}." : "Already current ({$result['version']})." );
+				break;
+			case 'rollback':
+				$result = $updater->rollback();
+				if ( is_wp_error( $result ) ) {
+					\WP_CLI::error( $result->get_error_message() );
+				}
+				\WP_CLI::success( "Active signature database: {$result}." );
+				break;
+			default:
+				$state = $updater->state();
+				\WP_CLI::log( 'Feed:        ' . SignatureUpdater::feed_url() );
+				\WP_CLI::log( 'Active:      ' . $this->plugin->signatures()->version() );
+				\WP_CLI::log( 'Downloaded:  ' . implode( ', ', array_column( $state['installed'], 'version' ) ) );
+				\WP_CLI::log( 'Last check:  ' . ( $state['last_check'] ? gmdate( 'Y-m-d H:i', $state['last_check'] ) . ' UTC' : 'never' ) );
+				\WP_CLI::log( 'Last error:  ' . ( $state['last_error'] ? $state['last_error'] : '-' ) );
+		}
+	}
+
+	/**
 	 * Talk to the Imunify360 agent.
 	 *
 	 * ## OPTIONS

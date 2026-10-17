@@ -53,6 +53,7 @@ final class Plugin {
 		add_action( 'fckmw_scan_complete', array( $this, 'on_scan_complete' ) );
 
 		( new Updater() )->register();
+		$this->signature_updater()->register();
 		$this->monitor()->register();
 		$this->remediation()->register();
 
@@ -79,17 +80,27 @@ final class Plugin {
 			'signatures',
 			static function () {
 				/**
-				 * Path to the signature database JSON file.
+				 * Path to a signature database JSON file that replaces the bundled
+				 * and downloaded ones (e.g. a self-managed database). Empty by default.
 				 *
-				 * @param string $path Defaults to the bundled signatures/signatures.json.
+				 * @param string $path
 				 */
-				$path = (string) apply_filters( 'fckmw_signature_file', FCKMW_DIR . 'signatures/signatures.json' );
+				$path = (string) apply_filters( 'fckmw_signature_file', '' );
 				try {
-					return Signatures::from_file( $path );
+					return '' !== $path ? Signatures::from_file( $path ) : ( new SignatureUpdater() )->load();
 				} catch ( \RuntimeException $e ) {
 					ActivityLog::log( 'signatures.error', $e->getMessage(), array(), 'critical' );
 					return new Signatures( array( 'version' => 'unavailable' ) );
 				}
+			}
+		);
+	}
+
+	public function signature_updater(): SignatureUpdater {
+		return $this->service(
+			'signature_updater',
+			static function () {
+				return new SignatureUpdater();
 			}
 		);
 	}
@@ -328,6 +339,9 @@ final class Plugin {
 		if ( ! wp_next_scheduled( self::CRON_DAILY ) ) {
 			wp_schedule_event( time() + 2 * HOUR_IN_SECONDS, 'daily', self::CRON_DAILY );
 		}
+		if ( ! wp_next_scheduled( SignatureUpdater::CRON ) ) {
+			wp_schedule_event( time() + 10 * MINUTE_IN_SECONDS, 'twicedaily', SignatureUpdater::CRON );
+		}
 	}
 
 	/** Bring 0.x data forward: schema v2, settings and quarantine index into network storage. */
@@ -372,5 +386,6 @@ final class Plugin {
 		wp_clear_scheduled_hook( self::CRON_DAILY );
 		wp_clear_scheduled_hook( self::CRON_DB );
 		wp_clear_scheduled_hook( Monitor::CRON_QUEUE );
+		wp_clear_scheduled_hook( SignatureUpdater::CRON );
 	}
 }

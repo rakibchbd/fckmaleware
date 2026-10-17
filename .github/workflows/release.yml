@@ -1,7 +1,8 @@
 name: Release
 
-# Every push to main whose plugin version has no release yet publishes one.
-# Customer sites pick it up through the built-in GitHub updater.
+# Every push to main whose plugin version has no release yet publishes one,
+# using the same script maintainers run locally (tools/build-release.sh).
+# Customer sites pick the release up through the built-in GitHub updater.
 on:
   push:
     branches: [main]
@@ -15,40 +16,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read plugin version
+      - name: Check whether this version is already released
         id: version
         run: |
-          header=$(sed -n 's/^ \* Version: *//p' fckmaleware.php | tr -d '[:space:]')
-          constant=$(sed -n "s/^define( 'FCKMW_VERSION', '\(.*\)' );/\1/p" fckmaleware.php)
-          if [ "$header" != "$constant" ]; then
-            echo "::error::Version header ($header) and FCKMW_VERSION ($constant) differ"
-            exit 1
-          fi
-          echo "version=$header" >> "$GITHUB_OUTPUT"
-          if git ls-remote --exit-code --tags origin "refs/tags/v$header" >/dev/null; then
+          version=$(sed -n 's/^ \* Version: *//p' fckmaleware.php | tr -d '[:space:]')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Test
-        if: steps.version.outputs.exists == 'false'
-        run: php tests/run.php
-
-      - name: Build plugin zip
-        if: steps.version.outputs.exists == 'false'
-        run: |
-          mkdir -p build/fckmaleware
-          rsync -a --exclude-from=.distignore ./ build/fckmaleware/
-          (cd build && zip -qr fckmaleware.zip fckmaleware)
-
-      - name: Publish release
+      - name: Build, test and publish
         if: steps.version.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          gh release create "v$VERSION" build/fckmaleware.zip \
-            --title "FckMaleware $VERSION" \
-            --target "$GITHUB_SHA" \
-            --generate-notes
+        run: tools/build-release.sh --publish
