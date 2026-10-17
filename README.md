@@ -19,20 +19,20 @@ Requires WordPress 5.8+ and PHP 7.4+. Works on single sites and multisite networ
 | **Integrity** | WordPress core and wordpress.org plugins are compared with official checksums. Other plugins and themes get a local baseline on the first standard scan, so later changes stand out. Missing core files and unknown PHP in core folders are reported. |
 | **Behaviour and persistence** | Hidden or newly created administrators, role and capability takeover, a changed `default_role` or site URL, `auto_prepend_file`, malicious cron payloads and hook callbacks built with `eval`. |
 | **Database** | Posts, options and comments on every site are checked for injected scripts, hidden links and PHP. Findings link to the right editor. Serialized data is never search-and-replaced. |
-| **Event-driven protection** | Malicious uploads are refused before they are saved. Plugins and themes are checked right after install or update. Administrator and security-option changes trigger alerts. |
-| **Remediation** | Quarantine keeps a compressed copy that is verified before the original is removed. "Replace with official copy" downloads the wordpress.org original, verifies its checksum and backs up the old file first. Restore points cover every action and bulk action. Automatic quarantine is opt-in and limited to very high-confidence cases. |
+| **Event-driven protection** | Malicious uploads are refused before they are saved, by a configurable policy (block mode and threshold, executable file types, images containing PHP, fail mode), with temporary upload blocks after repeated attempts. Plugins and themes are checked right after install or update. A periodic uploads check finds files written outside WordPress. Administrator and security-option changes trigger alerts. |
+| **Remediation** | Quarantine keeps a compressed copy that is verified before the original is removed; the original is re-hashed at removal time, and restores never overwrite. "Quarantine all eligible" and select-all-matching run as batched, resumable jobs with a preview, success/failed/skipped counts and retry, under a bulk safety policy. "Replace with official copy" downloads the wordpress.org original, verifies its checksum and backs up the old file first. Restore points cover every action and bulk action. Automatic quarantine is opt-in and limited to very high-confidence cases. |
 | **Hardening** | Six optional rules, each with risk, compatibility and undo notes, plus nine report-only checks. |
 | **Updates** | Plugin releases come from GitHub through the normal WordPress update screen. Signature databases come from an Ed25519-signed feed with expiry, anti-replay and rollback. |
 | **Notifications** | Grouped e-mail alerts with cooldowns, plus HMAC-signed webhooks (public addresses only). |
-| **Dashboard** | 14 sections: overview with an explained health score, scanner, findings, quarantine, real-time, hardening, AI, signatures, threat intel, schedule, reports, activity log, integrations, settings. Every number comes from the site's own records. |
-| **Imunify360** (optional) | If the agent is on the server, its malicious-file list for the site is imported as findings. Its proprietary signatures are never copied. |
+| **Dashboard** | **FCK Security**: one menu with five sections (Overview, Scan & Threats, Protection, Integrations, Settings & Logs) and contextual tabs, including Diagnostics. Every number comes from the site's own records. |
+| **Server scanners** (optional) | Integration center for Imunify360, ImunifyAV and cPGuard: detection, connection tests, status. Imunify360/ImunifyAV detections for the site are imported as findings; cPGuard is status-only (no documented interface for site accounts). Proprietary signatures are never copied. See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md). |
 | **AI second opinion** (optional, off by default) | An administrator can send a redacted excerpt of one finding to Anthropic Claude or any OpenAI-compatible endpoint, including a self-hosted model. The answer is advisory: the model cannot change, delete or run anything. |
 
 ## Install
 
 1. Download `fckmaleware.zip` from the [latest release](https://github.com/rakibchbd/fckmaleware/releases/latest).
 2. Upload it in **Plugins → Add New → Upload Plugin**, then activate it (network-activate on multisite).
-3. Open **FCK Malware → Malware Scanner** and run a **Standard** scan. It records integrity baselines for plugins and themes that are not on wordpress.org.
+3. Open **FCK Security → Scan & Threats** and run a **Full** scan. It records integrity baselines for plugins and themes that are not on wordpress.org.
 
 Updates come from this GitHub repository. When a higher version is pushed to `main`, sites see it in **Dashboard → Updates** within 6 hours and install it automatically: auto-update is on by default, and can be turned off on the Plugins screen. See [docs/RELEASING.md](docs/RELEASING.md).
 
@@ -45,6 +45,8 @@ Updates come from this GitHub repository. When a higher version is pushed to `ma
 | Deep | Every file including images, no cache | After a compromise |
 | Core | WordPress core against official checksums | After a core update or suspicion |
 | Recent | Files modified in the last N days | Incident triage |
+| Plugins & themes | Plugins, must-use plugins and themes | After installing or updating components |
+| Uploads | The uploads directory, images included | PHP hidden in uploads |
 | Custom | One directory | Investigating a plugin or folder |
 
 Scans run in steps of a few seconds through AJAX, WP-Cron or WP-CLI. They resume exactly where they stopped and never hit PHP time limits. Files over the size limit are listed in the scan result, not silently skipped.
@@ -52,7 +54,7 @@ Scans run in steps of a few seconds through AJAX, WP-Cron or WP-CLI. They resume
 ## WP-CLI
 
 ```sh
-wp fckmaleware scan [--mode=quick|standard|deep|core|recent|custom] [--dir=<path>] [--days=<n>] [--format=table|json]
+wp fckmaleware scan [--mode=quick|standard|deep|core|recent|custom|plugins|uploads] [--dir=<path>] [--days=<n>] [--format=table|json]
 wp fckmaleware findings [--status=open|quarantined|ignored|resolved] [--source=<layer>] [--format=json]
 wp fckmaleware db-scan
 wp fckmaleware persistence
@@ -75,7 +77,7 @@ wp fckmaleware imunify status|sync|scan
 
 ## Limits, stated plainly
 
-- **Real-time protection is event-driven.** WordPress has no file-system hooks, so files changed outside WordPress (FTP, another account on the server) are found by the next scheduled scan, not instantly.
+- **Real-time protection is event-driven.** WordPress has no file-system hooks, so files changed outside WordPress (FTP, another account on the server) are found by the periodic uploads check or the next scheduled scan, not instantly. Upload prevention covers WordPress's upload APIs (media library, REST API, sideloads), not files other plugins write directly.
 - **WP-Cron needs traffic** or a system cron calling `wp-cron.php`. With `DISABLE_WP_CRON` and no system cron, scheduled scans do not run. The dashboard warns about this.
 - **Plugins and themes not on wordpress.org** have no official checksums. Their baseline records whatever is on disk at the first standard scan, so a component that was already infected then is only covered by the signature and heuristic layers.
 - **Heuristics flag behaviour, not intent.** A legitimate file-manager or backup plugin can look like a web shell. Review findings before acting; "Accept as safe" remembers your decision until the file changes.
@@ -85,10 +87,13 @@ wp fckmaleware imunify status|sync|scan
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Configuration](docs/CONFIGURATION.md)
+- [Installation, upgrade, rollback and troubleshooting](docs/OPERATIONS.md)
+- [Server security integrations](docs/INTEGRATIONS.md)
+- [1.1 audit and implementation map](docs/AUDIT-1.1.md)
 - [Privacy and data handling](docs/PRIVACY.md)
 - [Threat-intelligence sources and licences](docs/THREAT-INTEL-SOURCES.md)
 - [Attribution](docs/ATTRIBUTION.md)
-- [Upgrading from 0.x](docs/MIGRATION.md)
+- [Upgrading](docs/MIGRATION.md)
 - [Releasing and signing](docs/RELEASING.md)
 - [Testing and results](docs/TESTING.md)
 - [Changelog](CHANGELOG.md)

@@ -380,7 +380,7 @@ final class Hardening {
 			if ( is_wp_error( $response ) ) {
 				$result = self::result( 'unknown', sprintf( /* translators: %s: error */ __( 'The site could not request its own uploads folder (%s), so enforcement could not be tested.', 'fckmaleware' ), $response->get_error_message() ) );
 			} elseif ( false !== strpos( (string) wp_remote_retrieve_body( $response ), $marker . '-ran' ) ) {
-				$result = self::result( 'fail', __( 'Test failed: a PHP file in uploads was executed. The server does not enforce the rule (nginx ignores .htaccess); add the server rule shown below.', 'fckmaleware' ) );
+				$result = self::result( 'fail', __( 'Test failed: a PHP file in uploads was executed. The server does not enforce .htaccess rules here (nginx, for example, ignores them); add the server rule shown on this card.', 'fckmaleware' ) );
 			} else {
 				/* translators: %d: HTTP status */
 				$result = self::result( 'pass', sprintf( __( 'Test passed: a PHP file in uploads was not executed (HTTP %d).', 'fckmaleware' ), (int) wp_remote_retrieve_response_code( $response ) ) );

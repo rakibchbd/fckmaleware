@@ -29,10 +29,16 @@ includes/
   class-notifier.php      E-mail and webhook alerts, grouping, cooldowns, SSRF guard
   class-hardening.php     Optional rules and report-only checks
   class-health.php        Health score with listed deductions
+  class-bulk-job.php      Bulk operations on findings: preview, batched resumable jobs, retry
+  class-scan-history.php  Newest 100 file and database scans
+  class-server-integrations.php  Imunify360 / ImunifyAV / cPGuard detection, tests, status
+  class-diagnostics.php   Environment and health checks (no secrets)
+  class-secrets.php       Encryption at rest for stored API keys
   class-feedback.php      Opt-in GitHub issue links and anonymous statistics
   class-imunify.php       Imunify360 agent adapter (read-only)
   ai/                     Redactor, provider interface, Anthropic and OpenAI-compatible providers, reviewer
-  admin/                  UI helpers, action handler, one class per dashboard section
+  admin/                  UI components, action handler, one class per tab (admin/pages)
+assets/                   admin.css (design system, scoped to .fckmw) and admin.js (dialog, scans, bulk jobs)
   class-cli.php           WP-CLI commands
 signatures/               Shipped database (signatures.json) and its sources
 feed/                     Signed update feed published from main
@@ -81,7 +87,7 @@ Tables use `base_prefix`, so there is one set per network:
 
 Settings and state live in network options on multisite, and in non-autoloaded options otherwise.
 
-The data folder is `uploads/fckmaleware-<20 random characters>/`. It holds the scan list, the quarantine and downloaded signature databases, and it is protected with deny rules and empty index files.
+The data folder is `uploads/fckmaleware-<20 random characters>/`. It holds the scan list, the quarantine and downloaded signature databases, and it is protected with deny rules and empty index files. `FCKMW_DATA_DIR` moves it, ideally outside the web root; stored files are migrated with byte-for-byte verification (`Paths::migrate_data_dir`). Quarantine removal renames the original, re-hashes it and only then deletes it; restores of quarantined files use exclusive create and never overwrite.
 
 ## Signature updates
 
@@ -98,9 +104,47 @@ The three newest databases are kept for rollback. Any failure keeps the current 
 
 ## Admin
 
-`Admin` registers the menu (Network Admin on multisite) and dispatches to `admin/pages/*`.
+`Admin` registers one top-level menu (Network Admin on multisite) with five sections:
 
-All state changes are POST requests to a single handler, `Admin\Actions`. It checks the capability, then the command against an allowlist, then a per-command nonce, and redirects back with a notice. Scan progress uses AJAX with its own nonce.
+- Overview;
+- Scan & Threats: Scanner, Threat Findings, Quarantine, Schedule;
+- Protection: Real-Time Protection, Hardening, Signatures, Threat Intelligence, AI Intelligence;
+- Integrations: Server Security, Webhooks & Updates;
+- Settings & Logs: Settings, Activity Log, Reports, Diagnostics.
+
+A section's tabs are chosen with `&tab=`. `Admin::sections()` is the single source of this structure. `Ui::url( $key )` takes a tab key, which is the pre-1.1 page slug, so every old link and redirect target still works. Requests for the old page slugs are redirected from `admin_page_access_denied`.
+
+`Admin\Ui` holds the shared components:
+
+- the page shell: brand bar, breadcrumbs, title and actions, tabs, flash notice;
+- cards, metrics, status pills and badges;
+- callouts and empty states;
+- form fields (accessible switches, selects, inputs, textareas);
+- disclosures and pagination.
+
+CSS and JS are enqueued only on FCK screens, which get the body class `fckmw-screen`. All CSS is scoped.
+
+All state changes go through `Admin\Actions`:
+
+- **POST commands.** Each one checks the capability, then the command against an allowlist, then a per-command nonce, and redirects back with a notice.
+- **AJAX.**
+  - Scans use the `fckmw_scan` nonce.
+  - Bulk jobs use the `fckmw_bulk` nonce.
+  - Every step re-checks the capability.
+
+### Bulk jobs
+
+`BulkJob` holds one job at a time in `fckmw_bulk_job`.
+
+1. **Selection.** Either explicit IDs (at most 2,000) or whitelisted filters. Filtered selections are always limited to open findings.
+2. **Preview.** Counts what would be processed and why the rest would be skipped. Nothing changes.
+3. **Steps.** Each step runs under a lock for about 6 s and handles 25 rows at a time, in ID order. Every row is re-read before it is acted on.
+4. **Results.**
+   - "Already handled" and "file missing" count as skipped.
+   - Permission, lock and disk errors are recoverable failures, which **Retry** turns into a new ID job.
+   - Starting and finishing are logged, and a quarantine job records one restore point.
+
+The bulk safety policy is `Remediation::quarantine_eligibility()`.
 
 The capability is `manage_network_options` on multisite and `manage_options` otherwise.
 
@@ -110,6 +154,6 @@ The capability is `manage_network_options` on multisite and `manage_options` oth
 |---|---|
 | `fckmw_signature_file` (filter) | Replace the signature database with a self-managed file |
 | `fckmw_signature_feed_url`, `fckmw_signature_feed_keys` (filters) | Self-hosted feed and keys |
-| `fckmw_scan_exclude_dirs` (filter) | Extra excluded directories |
+| `fckmw_scan_exclude_dirs` (filter) | Extra excluded directories (absolute); the `scan_exclusions` setting is applied first |
 | `fckmw_trusted_callback_roots` (filter) | Trusted roots for hook-callback checks |
 | `fckmw_detection`, `fckmw_finding_recorded`, `fckmw_scan_complete`, `fckmw_db_scan_complete`, `fckmw_event` (actions) | React to results |

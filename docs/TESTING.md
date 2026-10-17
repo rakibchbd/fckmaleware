@@ -7,10 +7,38 @@
 | Unit | `php tests/run.php` | PHP 7.4+ only. WordPress functions are stubbed. |
 | Signature database | `php tools/build-signatures.php --check` | PHP |
 | WordPress integration | `wp --path=<test site> eval-file tests/integration/run.php` | A disposable site with FCK Malware active |
+| WordPress integration (1.1 features) | `wp --path=<test site> eval-file tests/integration/features.php` | Same |
 | End-to-end (admin UI) | `node tests/e2e/ui.js <screenshot dir>` | Playwright and a disposable site (see the header of `tests/e2e/ui.js`) |
 | False-positive calibration | `php -d memory_limit=2G tools/corpus-scan.php <clean dirs>` | A clean corpus |
 
 **Run the integration and end-to-end suites only against a throwaway site.** They write sample files, quarantine and restore them, and change settings.
+
+## Results for 1.1.0 (2026-10-17)
+
+Environment: PHP 8.3.6, WordPress 7.1.3 on SQLite (single site), PHP built-in web server, Chromium through Playwright 1.56.1.
+
+| Suite | Result |
+|---|---|
+| Unit | **975 checks passed**: the 918 from 1.0, plus upload name rules, blocking policy, classification, exclusion parsing, CSV neutralisation and secret encryption. |
+| Signature database | Up to date: 45 signatures, v2026.10.17.4. |
+| WordPress integration (1.0 suite) | **39 of 39 passed.** |
+| WordPress integration (1.1 features) | **58 of 58 passed.** Covered: <ul><li>navigation and legacy slugs;</li><li>scan history;</li><li>refusal to scan the data folder;</li><li>bulk preview arithmetic;</li><li>bulk job with a file deleted mid-run (skipped, not failed), single-job lock, restore point and audit;</li><li>restore refusing to overwrite, then byte-identical restore;</li><li>exclusive create;</li><li>every bulk-policy rule;</li><li>uploads: clean accepted, double extension, PHP in image, malicious content, monitor mode, `.txt` not treated as an image;</li><li>temporary block and lifting it;</li><li>the uploads check finding a dropped file;</li><li>rescheduling without duplicates at the chosen hour;</li><li>a task skipped while a scan runs;</li><li>API key encrypted at rest, export without secrets, import validation and reset;</li><li>integration listing, cPGuard status-only, missing agent reported as not connected, test rate limit;</li><li>CSV formula cells.</li></ul> |
+| End-to-end UI | **37 of 37 passed, no JavaScript errors, no native dialogs.** Covered: <ul><li>login, score and metrics, five-section menu, legacy redirect;</li><li>custom scan through AJAX to completion and into the history;</li><li>classification badges;</li><li>the confirmation dialog opening and Esc cancelling;</li><li>quarantine and restore through the dialog;</li><li>select-all-matching bulk quarantine with preview and progress counts;</li><li>settings round-trip of a switch on and off;</li><li>hardening apply and revert;</li><li>all remaining tabs rendering with the shell;</li><li>the integration center;</li><li>keyboard focus ring;</li><li>no horizontal overflow at 390 px.</li></ul> |
+| All 16 tabs with `WP_DEBUG` on | Rendered from WP-CLI and in the browser; `debug.log` stayed empty for the whole run, including the browser session. |
+| PHP compatibility | PHPCompatibilityWP (PHPCompatibility 10.0.0-alpha2), `testVersion 7.4-`: 0 issues. |
+| Security sniffs | WPCS 3 (EscapeOutput, NonceVerification, ValidatedSanitizedInput, PreparedSQL, SafeRedirect): 0 issues. Checked against a deliberately bad sample to confirm the sniffs run. |
+| Uninstall | On copies of the test site: <ul><li>default: options, tables and data folder removed;</li><li>"keep data": options, findings and data folder kept;</li><li>cron events removed in both cases.</li></ul> |
+
+Not run for 1.1:
+
+- multisite;
+- MySQL/MariaDB;
+- PHP 7.4–8.2 at runtime;
+- Apache, nginx or LiteSpeed. The uploads-rule HTTP test ran against PHP's built-in server, which ignores `.htaccess`: it correctly reported that PHP in uploads executes, and the probe file was removed.
+- real Imunify360, ImunifyAV or cPGuard;
+- a live AI provider.
+
+Checked by hand on a copy of the test site: setting `FCKMW_DATA_DIR` to a folder outside the web root moved 122 quarantined copies (0 failures). All 122 still passed their SHA-256 check from the new location, and the Diagnostics check reported the folder as outside the web root.
 
 ## Results for 1.0.0 (2026-10-17)
 

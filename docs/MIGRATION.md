@@ -1,3 +1,28 @@
+# Upgrading from 1.0.x to 1.1
+
+The upgrade is automatic, runs once on the first request, and keeps all data.
+
+## What happens
+
+1. **Schema 4.** Three indexes are added to the findings table: status + severity, detection date, quarantine key. No column changes, no data rewritten.
+2. **Settings.** New keys get their defaults; existing values are untouched. The AI API key is encrypted the next time settings are saved (plain values from 1.0 are still read until then).
+3. **Scan history** starts with the last complete scan recorded by 1.0.
+4. **Schedules** are rebuilt:
+   - the file scan moves to the configured hour (default 03:00, site time zone);
+   - a weekly core integrity check and a twice-daily uploads check are added.
+
+   Turn them off under **Scan & Threats → Schedule** if you do not want them.
+5. **Navigation.** The menu is now **FCK Security** with five sections. Old screen addresses (`?page=fckmaleware-findings` and so on) redirect to their new tab.
+6. **Upload policy.** New defaults:
+   - executable file types and images containing PHP are refused for every user, including administrators;
+   - three refused uploads within an hour block that account's uploads for 60 minutes.
+
+   Review them under **Protection → Real-Time Protection**.
+
+## Rolling back
+
+See [OPERATIONS.md](OPERATIONS.md#roll-back-to-10x).
+
 # Upgrading from 0.x to 1.0
 
 The upgrade is automatic. It runs on activation and on the first request after the plugin files change, and it is safe to repeat.

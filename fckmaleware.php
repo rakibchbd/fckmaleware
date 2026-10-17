@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       FCK Malware
  * Plugin URI:        https://github.com/rakibchbd/fckmaleware
- * Description:       Free, open-source malware protection for WordPress: multi-layer detection (signatures, heuristics, integrity, behaviour), database scanning, safe remediation, signed signature updates and optional Imunify360 integration.
- * Version:           1.0.1
+ * Description:       Free, open-source malware protection for WordPress: multi-layer detection (signatures, heuristics, integrity, behaviour), database scanning, safe remediation, signed signature updates and optional Imunify360, ImunifyAV and cPGuard integration.
+ * Version:           1.1.0
  * Requires at least: 5.8
  * Requires PHP:      7.4
  * Network:           true
@@ -17,7 +17,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'FCKMW_VERSION', '1.0.1' );
+define( 'FCKMW_VERSION', '1.1.0' );
 define( 'FCKMW_FILE', __FILE__ );
 define( 'FCKMW_DIR', plugin_dir_path( __FILE__ ) );
 define( 'FCKMW_URL', plugin_dir_url( __FILE__ ) );
