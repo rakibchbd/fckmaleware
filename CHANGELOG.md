@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.0.1 (2026-10-17)
+- Plugin updates are delivered straight from the `main` branch on GitHub. A version bump pushed to `main` is offered to every site, and auto-update is on by default.
+
 ## 1.0.0 (2026-10-17)
 
 A rewrite of 0.2.0 into a layered protection system. Data from 0.x is migrated automatically; see `docs/MIGRATION.md`.
