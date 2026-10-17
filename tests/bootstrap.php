@@ -42,6 +42,7 @@ if ( ! function_exists( 'wp_parse_url' ) ) {
 require FCKMW_ROOT . '/includes/class-signatures.php';
 require FCKMW_ROOT . '/includes/class-feed.php';
 require FCKMW_ROOT . '/includes/class-notifier.php';
+require FCKMW_ROOT . '/includes/ai/class-redactor.php';
 require FCKMW_ROOT . '/includes/class-imunify.php';
 require FCKMW_ROOT . '/includes/detection/class-heuristics.php';
 require FCKMW_ROOT . '/includes/detection/class-file-context.php';

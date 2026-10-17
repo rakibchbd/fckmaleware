@@ -212,6 +212,15 @@ final class Plugin {
 		return new Imunify( (string) Settings::get( 'imunify_binary' ), (bool) Settings::get( 'imunify_use_sudo' ) );
 	}
 
+	public function ai(): Ai\Reviewer {
+		return $this->service(
+			'ai',
+			function () {
+				return new Ai\Reviewer( $this->findings() );
+			}
+		);
+	}
+
 	public function hardening(): Hardening {
 		return $this->service(
 			'hardening',

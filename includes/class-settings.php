@@ -62,6 +62,7 @@ final class Settings {
 			'ai_model'                 => array( 'text', '' ),
 			'ai_endpoint'              => array( 'url', '' ),
 			'ai_max_chars'             => array( 'int', 6000, array( 500, 20000 ) ),
+			'ai_daily_limit'           => array( 'int', 25, array( 1, 1000 ) ),
 		);
 	}
 

@@ -9,8 +9,8 @@ namespace Fckmaleware;
 
 final class Schema {
 
-	/** 1 = 0.1/0.2 findings table; 2 = 1.0 (findings v2, file cache, baselines, activity log). */
-	public const VERSION = '2';
+	/** 1 = 0.1/0.2 findings table; 2 = findings v2, file cache, baselines, activity log; 3 = AI review column. */
+	public const VERSION = '3';
 
 	public const OPTION = 'fckmw_db_version';
 
@@ -55,6 +55,7 @@ final class Schema {
 				excerpt text NULL,
 				evidence text NULL,
 				remediation text NULL,
+				ai_review longtext NULL,
 				status varchar(20) NOT NULL DEFAULT 'open',
 				quarantine_key varchar(64) NOT NULL DEFAULT '',
 				occurrences int(10) unsigned NOT NULL DEFAULT 1,
@@ -103,7 +104,7 @@ final class Schema {
 			) {$charset};"
 		);
 
-		$missing = self::missing_columns( $findings, array( 'object_type', 'object_ref', 'verdict', 'confidence', 'family', 'evidence', 'remediation', 'occurrences', 'last_seen_at' ) );
+		$missing = self::missing_columns( $findings, array( 'object_type', 'object_ref', 'verdict', 'confidence', 'family', 'evidence', 'remediation', 'occurrences', 'last_seen_at', 'ai_review' ) );
 		foreach ( array( $files, $baseline, $events ) as $table ) {
 			if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) { // phpcs:ignore WordPress.DB
 				$missing[] = $table;

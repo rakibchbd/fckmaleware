@@ -372,6 +372,42 @@ final class CLI {
 	}
 
 	/**
+	 * Ask the configured external AI provider for an advisory review of a finding.
+	 *
+	 * The review is stored next to the finding; it never changes the finding or the site.
+	 *
+	 * ## OPTIONS
+	 *
+	 * <id>
+	 * : Finding ID.
+	 *
+	 * [--show-request]
+	 * : Print the redacted text that would be sent, without sending it.
+	 *
+	 * @subcommand ai-review
+	 * @when after_wp_load
+	 */
+	public function ai_review( array $args, array $assoc ): void {
+		$id = (int) $args[0];
+		if ( isset( $assoc['show-request'] ) ) {
+			$finding = $this->plugin->findings()->get( $id );
+			if ( ! $finding ) {
+				\WP_CLI::error( 'Finding not found.' );
+			}
+			\WP_CLI::log( Ai\Reviewer::build_case( $finding, (int) Settings::get( 'ai_max_chars' ) ) );
+			return;
+		}
+		$review = $this->plugin->ai()->review( $id );
+		if ( is_wp_error( $review ) ) {
+			\WP_CLI::error( $review->get_error_message() );
+		}
+		\WP_CLI::log( sprintf( 'Verdict: %s (%d%%) — local verdict %s — %s', $review['verdict'], $review['confidence'], $review['local_verdict'], $review['agrees'] ? 'agrees' : 'disagrees' ) );
+		\WP_CLI::log( 'Explanation: ' . $review['explanation'] );
+		\WP_CLI::log( 'Recommended: ' . $review['recommended_action'] . ' (advisory; nothing was changed)' );
+		\WP_CLI::log( sprintf( 'Model: %s, tokens: %d, cost: %s', $review['model'], $review['input_tokens'] + $review['output_tokens'], null === $review['cost_usd'] ? 'n/a' : '$' . number_format( (float) $review['cost_usd'], 4 ) ) );
+	}
+
+	/**
 	 * Send a test alert on every enabled channel (email, webhook).
 	 *
 	 * @subcommand notify-test
