@@ -1,0 +1,8 @@
+<?php
+// Standard upload handling through WordPress APIs.
+function myplugin_upload() {
+	check_ajax_referer( 'myplugin_upload' );
+	require_once ABSPATH . 'wp-admin/includes/file.php';
+	$result = wp_handle_upload( $_FILES['file'], array( 'test_form' => false ) );
+	wp_send_json( $result );
+}

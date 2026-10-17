@@ -1,0 +1,3 @@
+<?php
+// Admin menu icon embedded as a base64 SVG data URI (very common).
+add_menu_page( 'My Plugin', 'My Plugin', 'manage_options', 'my-plugin', 'my_plugin_page', 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMCAyMCI+PHBhdGggZmlsbD0iI2E3YWFhZCIgZD0iTTEwIDJDNS42IDIgMiA1LjYgMiAxMHMzLjYgOCA4IDggOC0zLjYgOC04LTMuNi04LTgtOHptMCAxNGMtMy4zIDAtNi0yLjctNi02czIuNy02IDYtNiA2IDIuNyA2IDYtMi43IDYtNiA2eiIvPjwvc3ZnPg==' );

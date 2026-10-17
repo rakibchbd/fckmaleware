@@ -1,0 +1,11 @@
+<?php
+// Page cache: writes generated HTML (not request input) to a cache file.
+function myplugin_cache_write( $key, $html ) {
+	$dir = WP_CONTENT_DIR . '/cache/myplugin';
+	wp_mkdir_p( $dir );
+	file_put_contents( $dir . '/' . md5( $key ) . '.html', $html );
+}
+ob_start( function ( $html ) {
+	myplugin_cache_write( $_SERVER['REQUEST_URI'], $html );
+	return $html;
+} );

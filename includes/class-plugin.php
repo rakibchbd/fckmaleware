@@ -1,31 +1,32 @@
 <?php
 /**
- * Wires the components together and owns cron, Imunify sync and alerts.
+ * Service container and lifecycle: wires components, owns cron and the
+ * plugin's activation, deactivation and upgrade routines.
  *
  * @package Fckmaleware
  */
 
 namespace Fckmaleware;
 
+use Fckmaleware\Detection\Baseline;
+use Fckmaleware\Detection\Checksums;
+use Fckmaleware\Detection\Engine;
+use Fckmaleware\Detection\HeuristicLayer;
+use Fckmaleware\Detection\IntegrityLayer;
+use Fckmaleware\Detection\LocationLayer;
+use Fckmaleware\Detection\SignatureLayer;
+
 final class Plugin {
 
 	public const CRON_SCAN     = 'fckmw_scheduled_scan';
 	public const CRON_CONTINUE = 'fckmw_scan_continue';
+	public const CRON_DAILY    = 'fckmw_daily_maintenance';
 
 	/** @var Plugin|null */
 	private static $instance;
 
-	/** @var Signatures|null */
-	private $signatures;
-
-	/** @var Findings|null */
-	private $findings;
-
-	/** @var Scanner|null */
-	private $scanner;
-
-	/** @var Quarantine|null */
-	private $quarantine;
+	/** @var array<string, object> */
+	private $services = array();
 
 	public static function instance(): self {
 		if ( null === self::$instance ) {
@@ -34,13 +35,19 @@ final class Plugin {
 		return self::$instance;
 	}
 
+	/** Capability required for every FCK Malware screen and action (network-wide on multisite). */
+	public static function capability(): string {
+		return is_multisite() ? 'manage_network_options' : 'manage_options';
+	}
+
 	public function boot(): void {
-		if ( Findings::DB_VERSION !== get_option( 'fckmw_db_version' ) ) {
-			Findings::install();
+		if ( ! Schema::is_current() ) {
+			self::upgrade();
 		}
 
 		add_action( self::CRON_SCAN, array( $this, 'run_scheduled_scan' ) );
 		add_action( self::CRON_CONTINUE, array( $this, 'continue_scan' ) );
+		add_action( self::CRON_DAILY, array( $this, 'daily_maintenance' ) );
 		add_action( 'fckmw_scan_complete', array( $this, 'on_scan_complete' ) );
 
 		( new Updater() )->register();
@@ -53,87 +60,138 @@ final class Plugin {
 		}
 	}
 
-	public function signatures(): Signatures {
-		if ( null === $this->signatures ) {
-			/**
-			 * Path to the signature database JSON file.
-			 *
-			 * @param string $path Defaults to the bundled signatures/signatures.json.
-			 */
-			$path = (string) apply_filters( 'fckmw_signature_file', FCKMW_DIR . 'signatures/signatures.json' );
-			try {
-				$this->signatures = Signatures::from_file( $path );
-			} catch ( \RuntimeException $e ) {
-				$this->signatures = new Signatures( array( 'version' => 'unavailable' ) );
-			}
+	/** @return object */
+	private function service( string $name, callable $factory ) {
+		if ( ! isset( $this->services[ $name ] ) ) {
+			$this->services[ $name ] = $factory();
 		}
-		return $this->signatures;
+		return $this->services[ $name ];
+	}
+
+	// --- Services -------------------------------------------------------------
+
+	public function signatures(): Signatures {
+		return $this->service(
+			'signatures',
+			static function () {
+				/**
+				 * Path to the signature database JSON file.
+				 *
+				 * @param string $path Defaults to the bundled signatures/signatures.json.
+				 */
+				$path = (string) apply_filters( 'fckmw_signature_file', FCKMW_DIR . 'signatures/signatures.json' );
+				try {
+					return Signatures::from_file( $path );
+				} catch ( \RuntimeException $e ) {
+					ActivityLog::log( 'signatures.error', $e->getMessage(), array(), 'critical' );
+					return new Signatures( array( 'version' => 'unavailable' ) );
+				}
+			}
+		);
 	}
 
 	public function findings(): Findings {
-		if ( null === $this->findings ) {
-			$this->findings = new Findings();
+		return $this->service(
+			'findings',
+			static function () {
+				return new Findings();
+			}
+		);
+	}
+
+	public function file_cache(): FileCache {
+		return $this->service(
+			'file_cache',
+			static function () {
+				return new FileCache();
+			}
+		);
+	}
+
+	public function checksums(): Checksums {
+		return $this->service(
+			'checksums',
+			static function () {
+				return new Checksums();
+			}
+		);
+	}
+
+	public function baseline(): Baseline {
+		return $this->service(
+			'baseline',
+			static function () {
+				return new Baseline();
+			}
+		);
+	}
+
+	/**
+	 * Build a detection engine.
+	 *
+	 * @param array<string, bool>|null $recording Baseline recording state, or null to never record baselines.
+	 * @param array{images?: bool} $options
+	 */
+	public function engine( ?array $recording = null, array $options = array() ): Engine {
+		$settings  = Settings::all();
+		$integrity = new IntegrityLayer( $this->checksums(), $this->baseline(), (bool) $settings['core_integrity'], (bool) $settings['plugin_integrity'], $recording );
+		$layers    = array(
+			new LocationLayer( Paths::uploads_relative() ),
+			new SignatureLayer( $this->signatures() ),
+		);
+		if ( $settings['heuristics'] ) {
+			$layers[] = new HeuristicLayer( (int) $settings['heuristic_threshold'] );
 		}
-		return $this->findings;
+		$fingerprint = implode( '|', array( (int) $settings['heuristics'], (int) $settings['heuristic_threshold'], (int) $settings['core_integrity'], (int) $settings['plugin_integrity'], (int) ! empty( $options['images'] ) ) );
+		return new Engine( $this->signatures(), $integrity, $layers, $fingerprint );
 	}
 
 	public function scanner(): Scanner {
-		if ( null === $this->scanner ) {
-			$this->scanner = new Scanner( $this->signatures(), $this->findings() );
-		}
-		return $this->scanner;
+		return $this->service(
+			'scanner',
+			function () {
+				return new Scanner( array( $this, 'engine' ), $this->findings(), $this->file_cache() );
+			}
+		);
 	}
 
 	public function quarantine(): Quarantine {
-		if ( null === $this->quarantine ) {
-			$this->quarantine = new Quarantine();
-		}
-		return $this->quarantine;
+		return $this->service(
+			'quarantine',
+			static function () {
+				return new Quarantine();
+			}
+		);
 	}
 
 	public function imunify(): Imunify {
 		return new Imunify( (string) Settings::get( 'imunify_binary' ), (bool) Settings::get( 'imunify_use_sudo' ) );
 	}
 
-	/**
-	 * Quarantine the file behind a finding and update every open finding on that file.
-	 *
-	 * @return true|\WP_Error
-	 */
+	// --- Remediation helpers (expanded by the Remediation service) -------------
+
+	/** @return true|\WP_Error */
 	public function quarantine_finding( int $id ) {
 		$finding = $this->findings()->get( $id );
-		if ( ! $finding || 'open' !== $finding['status'] ) {
-			return new \WP_Error( 'fckmw_unknown', __( 'Finding not found or not open.', 'fckmaleware' ) );
+		if ( ! $finding || 'open' !== $finding['status'] || 'file' !== $finding['object_type'] ) {
+			return new \WP_Error( 'fckmw_unknown', __( 'Finding not found, not open, or not a file.', 'fckmaleware' ) );
 		}
 		$key = $this->quarantine_path( $finding['file'] );
 		return is_wp_error( $key ) ? $key : true;
 	}
 
-	/**
-	 * Quarantine a file by its path relative to the site root.
-	 *
-	 * @return string|\WP_Error Quarantine key.
-	 */
+	/** @return string|\WP_Error Quarantine key. */
 	public function quarantine_path( string $file ) {
 		$key = $this->quarantine()->isolate( $file, $this->is_foreign_core_file( $file ) );
 		if ( ! is_wp_error( $key ) ) {
 			$this->findings()->set_status_for_file( $file, 'quarantined', $key );
+			ActivityLog::log( 'quarantine.isolate', sprintf( /* translators: %s: file */ __( 'Quarantined %s', 'fckmaleware' ), $file ), array( 'file' => $file, 'key' => $key ), 'notice' );
 		}
 		return $key;
 	}
 
-	/** Move findings linked to a quarantine entry to a new status once the entry is restored or deleted. */
 	public function release_quarantine_findings( string $key, string $status ): void {
-		global $wpdb;
-		$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			Findings::table(),
-			array(
-				'status'         => $status,
-				'quarantine_key' => '',
-				'updated_at'     => current_time( 'mysql', true ),
-			),
-			array( 'quarantine_key' => $key )
-		);
+		$this->findings()->release_quarantine( $key, $status );
 	}
 
 	/**
@@ -156,37 +214,46 @@ final class Plugin {
 	public function sync_imunify() {
 		$files = $this->imunify()->malicious_files( Paths::root() );
 		if ( is_wp_error( $files ) ) {
+			ActivityLog::log( 'imunify.error', $files->get_error_message(), array(), 'warning' );
 			return $files;
 		}
 
-		$this->findings()->clear_open( array( 'imunify' ) );
-		$count = 0;
+		$scan_id = 'imunify:' . time();
+		$count   = 0;
 		foreach ( $files as $item ) {
 			// Entries Imunify already cleaned or restored are not actionable here.
 			if ( in_array( strtolower( $item['status'] ), array( 'cleanup_done', 'cleaned', 'restored_original', 'removed' ), true ) ) {
 				continue;
 			}
-			$signature_id = 'IMUNIFY:' . substr( $item['signature'], 0, 180 );
-			if ( $this->findings()->is_ignored_any( $item['file'], $signature_id ) ) {
-				continue;
-			}
-			$this->findings()->add(
+			$result = $this->findings()->upsert(
 				array(
+					'scan_id'        => $scan_id,
 					'source'         => 'imunify',
 					'file'           => $item['file'],
-					'signature_id'   => $signature_id,
+					'signature_id'   => 'IMUNIFY:' . substr( $item['signature'], 0, 180 ),
 					'signature_name' => $item['signature'],
+					'family'         => 'Imunify360',
 					'severity'       => 'critical',
+					'confidence'     => 90,
+					'verdict'        => 'malicious',
+					'evidence'       => __( 'Reported by the Imunify360 agent on this server.', 'fckmaleware' ),
+					'remediation'    => 'quarantine',
 				)
 			);
-			$count++;
+			if ( 'ignored' !== $result['outcome'] ) {
+				$count++;
+			}
 		}
-		update_option( 'fckmw_imunify_last_sync', time(), false );
+		$this->findings()->resolve_stale( $scan_id, array( 'imunify' ) );
+		Store::set( 'fckmw_imunify_last_sync', time() );
+		ActivityLog::log( 'imunify.sync', sprintf( /* translators: %d: count */ __( 'Imunify360 sync: %d open detections.', 'fckmaleware' ), $count ), array( 'count' => $count ) );
 		return $count;
 	}
 
+	// --- Cron -----------------------------------------------------------------
+
 	public function run_scheduled_scan(): void {
-		$state = $this->scanner()->start( 'scheduled' );
+		$state = $this->scanner()->start( (string) Settings::get( 'scheduled_mode' ), 'scheduled' );
 		if ( ! is_wp_error( $state ) ) {
 			$this->continue_scan();
 		}
@@ -204,38 +271,14 @@ final class Plugin {
 		if ( Settings::get( 'imunify_enabled' ) && Settings::get( 'imunify_sync_scan' ) ) {
 			$this->sync_imunify();
 		}
-		if ( 'manual' !== $state['trigger'] && Settings::get( 'email_alerts' ) ) {
-			$this->send_alert();
-		}
 	}
 
-	private function send_alert(): void {
-		$counts = $this->findings()->open_counts();
-		if ( 0 === $counts['total'] ) {
-			return;
-		}
-		$to = Settings::get( 'alert_email' ) ?: get_option( 'admin_email' );
-
-		$lines = array(
-			/* translators: %s: site URL */
-			sprintf( __( 'FckMaleware found suspicious files on %s.', 'fckmaleware' ), home_url() ),
-			'',
-		);
-		foreach ( array_keys( Signatures::SEVERITIES ) as $severity ) {
-			if ( $counts[ $severity ] ) {
-				$lines[] = sprintf( '%s: %d', ucfirst( $severity ), $counts[ $severity ] );
-			}
-		}
-		$lines[] = '';
-		$lines[] = __( 'Review them here:', 'fckmaleware' ) . ' ' . admin_url( 'admin.php?page=fckmaleware' );
-
-		wp_mail(
-			$to,
-			/* translators: 1: number of findings, 2: site name */
-			sprintf( __( '[%2$s] %1$d malware findings need review', 'fckmaleware' ), $counts['total'], get_bloginfo( 'name' ) ),
-			implode( "\n", $lines )
-		);
+	public function daily_maintenance(): void {
+		ActivityLog::prune();
+		$this->findings()->prune_resolved( 90 );
 	}
+
+	// --- Lifecycle ------------------------------------------------------------
 
 	public static function reschedule(): void {
 		wp_clear_scheduled_hook( self::CRON_SCAN );
@@ -243,19 +286,50 @@ final class Plugin {
 		if ( 'off' !== $schedule ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, $schedule, self::CRON_SCAN );
 		}
+		if ( ! wp_next_scheduled( self::CRON_DAILY ) ) {
+			wp_schedule_event( time() + 2 * HOUR_IN_SECONDS, 'daily', self::CRON_DAILY );
+		}
+	}
+
+	/** Bring 0.x data forward: schema v2, settings and quarantine index into network storage. */
+	public static function upgrade(): void {
+		$previous = (string) get_option( Schema::OPTION, '' );
+		if ( ! Schema::install() ) {
+			return; // Retried on the next request; the error is shown in the admin.
+		}
+
+		if ( is_multisite() ) {
+			foreach ( array( Settings::OPTION, 'fckmw_quarantine', 'fckmw_last_scan', 'fckmw_imunify_last_sync' ) as $option ) {
+				$legacy = get_option( $option, null );
+				if ( null !== $legacy && false === get_site_option( $option, false ) ) {
+					update_site_option( $option, $legacy );
+				}
+			}
+		}
+		// 0.x kept scan state with a different shape; a stale running scan would never finish.
+		$state = Store::get( Scanner::STATE_OPTION, array() );
+		if ( is_array( $state ) && isset( $state['status'] ) && ! isset( $state['phase'] ) ) {
+			Store::delete( Scanner::STATE_OPTION );
+		}
+		Paths::ensure_data_dir();
+		self::reschedule();
+
+		if ( '' !== $previous && Schema::VERSION !== $previous ) {
+			ActivityLog::log( 'plugin.upgrade', sprintf( /* translators: 1: old schema, 2: new schema */ __( 'Data upgraded from schema %1$s to %2$s.', 'fckmaleware' ), $previous, Schema::VERSION ) );
+		}
 	}
 
 	public static function activate(): void {
-		Findings::install();
-		Paths::ensure_data_dir();
-		if ( false === get_option( Settings::OPTION ) ) {
-			add_option( Settings::OPTION, Settings::defaults(), '', false );
+		self::upgrade();
+		if ( false === Store::get( Settings::OPTION, false ) ) {
+			Store::set( Settings::OPTION, Settings::defaults() );
 		}
-		self::reschedule();
+		ActivityLog::log( 'plugin.activate', __( 'FCK Malware activated.', 'fckmaleware' ) );
 	}
 
 	public static function deactivate(): void {
 		wp_clear_scheduled_hook( self::CRON_SCAN );
 		wp_clear_scheduled_hook( self::CRON_CONTINUE );
+		wp_clear_scheduled_hook( self::CRON_DAILY );
 	}
 }

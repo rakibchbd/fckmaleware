@@ -1,0 +1,17 @@
+<?php
+// Whitelisted AJAX dispatcher.
+class Myplugin_Ajax {
+	private $actions = array( 'save' => 'handle_save', 'load' => 'handle_load' );
+	public function dispatch() {
+		$action = isset( $_POST['sub'] ) ? sanitize_key( $_POST['sub'] ) : '';
+		if ( isset( $this->actions[ $action ] ) ) {
+			call_user_func( array( $this, $this->actions[ $action ] ), $_POST );
+		}
+		$method = 'handle_' . $action;
+		if ( method_exists( $this, $method ) ) {
+			$this->$method();
+		}
+	}
+	public function handle_save() {}
+	public function handle_load() {}
+}

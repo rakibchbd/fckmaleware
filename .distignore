@@ -3,5 +3,8 @@
 .distignore
 .gitignore
 build
+docs/AUDIT.md
+docs/ROADMAP.md
+signatures/src
 tests
 tools

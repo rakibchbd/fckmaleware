@@ -1,0 +1,7 @@
+<?php
+// Fetches remote JSON data (license check) and decodes it; nothing is executed.
+$response = wp_remote_get( 'https://api.example.com/v1/license' );
+$body     = json_decode( wp_remote_retrieve_body( $response ), true );
+if ( ! empty( $body['valid'] ) ) {
+	update_option( 'myplugin_license_ok', 1 );
+}

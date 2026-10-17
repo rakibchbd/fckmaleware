@@ -17,9 +17,31 @@ final class CLI {
 	}
 
 	/**
-	 * Run a full scan in this process and list open findings.
+	 * Run a scan in this process and list open findings.
 	 *
 	 * ## OPTIONS
+	 *
+	 * [--mode=<mode>]
+	 * : Scan mode.
+	 * ---
+	 * default: standard
+	 * options:
+	 *   - quick
+	 *   - standard
+	 *   - deep
+	 *   - custom
+	 *   - core
+	 *   - recent
+	 * ---
+	 *
+	 * [--dir=<dir>]
+	 * : Directory for --mode=custom, relative to the WordPress root.
+	 *
+	 * [--days=<days>]
+	 * : Look-back window for --mode=recent.
+	 * ---
+	 * default: 7
+	 * ---
 	 *
 	 * [--format=<format>]
 	 * : Output format for the findings.
@@ -38,25 +60,35 @@ final class CLI {
 	 * @when after_wp_load
 	 */
 	public function scan( array $args, array $assoc ): void {
-		$scanner = $this->plugin->scanner();
-		$state   = $scanner->start( 'cli' );
+		$scanner  = $this->plugin->scanner();
+		$progress = null;
+		$done     = 0;
+		$state    = $scanner->run(
+			$assoc['mode'] ?? 'standard',
+			'cli',
+			array( 'scope' => $assoc['dir'] ?? '', 'days' => (int) ( $assoc['days'] ?? 7 ) ),
+			static function ( array $state ) use ( &$progress, &$done ) {
+				if ( 'scanning' !== ( $state['phase'] ?? '' ) && 'done' !== ( $state['phase'] ?? '' ) ) {
+					return;
+				}
+				if ( null === $progress ) {
+					$progress = \WP_CLI\Utils\make_progress_bar( 'Scanning files', (int) $state['total'] );
+				}
+				$progress->tick( (int) $state['position'] - $done );
+				$done = (int) $state['position'];
+			}
+		);
 		if ( is_wp_error( $state ) ) {
 			\WP_CLI::error( $state->get_error_message() );
 		}
-
-		$progress = \WP_CLI\Utils\make_progress_bar( 'Scanning files', (int) $state['total'] );
-		$done     = 0;
-		while ( 'running' === $state['status'] ) {
-			$state = $scanner->step( 5.0 );
-			$progress->tick( (int) $state['position'] - $done );
-			$done = (int) $state['position'];
+		if ( $progress ) {
+			$progress->finish();
 		}
-		$progress->finish();
 
 		if ( 'complete' !== $state['status'] ) {
 			\WP_CLI::error( "Scan ended with status: {$state['status']}" );
 		}
-		\WP_CLI::log( sprintf( 'Scanned %d files with signatures v%s.', $state['total'], $state['sig_version'] ) );
+		\WP_CLI::log( sprintf( 'Checked %d files (%d unchanged skipped) with signatures v%s: %d detections, %d new, %d resolved.', $state['total'], $state['skipped'], $state['sig_version'], $state['found'], $state['new'], $state['resolved'] ?? 0 ) );
 
 		$this->findings( array(), $assoc );
 
@@ -100,7 +132,7 @@ final class CLI {
 			\WP_CLI::success( 'No findings.' );
 			return;
 		}
-		\WP_CLI\Utils\format_items( $assoc['format'] ?? 'table', $result['rows'], array( 'id', 'severity', 'file', 'line', 'signature_id', 'signature_name', 'source' ) );
+		\WP_CLI\Utils\format_items( $assoc['format'] ?? 'table', $result['rows'], array( 'id', 'severity', 'verdict', 'confidence', 'file', 'line', 'signature_id', 'signature_name', 'source' ) );
 	}
 
 	/**

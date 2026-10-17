@@ -1,0 +1,10 @@
+<?php
+// Backup plugin: runs mysqldump with escaped, admin-configured arguments.
+function myplugin_dump( $file ) {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		return;
+	}
+	$cmd = 'mysqldump --single-transaction ' . escapeshellarg( DB_NAME ) . ' > ' . escapeshellarg( $file );
+	exec( $cmd, $output, $status );
+	return 0 === $status;
+}

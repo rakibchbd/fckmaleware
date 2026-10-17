@@ -1,6 +1,10 @@
 <?php
 /**
- * Findings table: one row per (file, signature) detection.
+ * Findings store: one row per (object, signature) detection.
+ *
+ * A finding is upserted every time a scan sees it. A scan that covered an
+ * object and no longer sees the detection marks it resolved; a detection
+ * that reappears after being resolved or quarantined counts as reinfection.
  *
  * @package Fckmaleware
  */
@@ -9,68 +13,144 @@ namespace Fckmaleware;
 
 final class Findings {
 
-	public const DB_VERSION = '1';
+	/** @deprecated 1.0 Use Schema::VERSION. */
+	public const DB_VERSION = Schema::VERSION;
 
 	public const STATUSES = array( 'open', 'quarantined', 'ignored', 'resolved' );
 
+	public const VERDICTS = array( 'malicious', 'suspicious' );
+
+	/** Fields a detection may carry; anything else passed to upsert() is ignored. */
+	private const FIELDS = array( 'scan_id', 'source', 'object_type', 'object_ref', 'file', 'file_hash', 'signature_id', 'signature_name', 'family', 'severity', 'verdict', 'confidence', 'line', 'excerpt', 'evidence', 'remediation' );
+
 	public static function table(): string {
-		global $wpdb;
-		return $wpdb->prefix . 'fckmw_findings';
+		return Schema::table( 'findings' );
 	}
 
+	/** @deprecated 1.0 Use Schema::install(). */
 	public static function install(): void {
-		global $wpdb;
-		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-
-		$table   = self::table();
-		$charset = $wpdb->get_charset_collate();
-
-		dbDelta(
-			"CREATE TABLE {$table} (
-				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-				scan_id varchar(32) NOT NULL DEFAULT '',
-				source varchar(20) NOT NULL DEFAULT 'builtin',
-				file text NOT NULL,
-				file_hash char(64) NOT NULL DEFAULT '',
-				signature_id varchar(191) NOT NULL DEFAULT '',
-				signature_name varchar(255) NOT NULL DEFAULT '',
-				severity varchar(10) NOT NULL DEFAULT 'medium',
-				line int(10) unsigned NOT NULL DEFAULT 0,
-				excerpt text NULL,
-				status varchar(20) NOT NULL DEFAULT 'open',
-				quarantine_key varchar(64) NOT NULL DEFAULT '',
-				detected_at datetime NOT NULL,
-				updated_at datetime NOT NULL,
-				PRIMARY KEY  (id),
-				KEY status (status),
-				KEY source (source)
-			) {$charset};"
-		);
-
-		update_option( 'fckmw_db_version', self::DB_VERSION, false );
+		Schema::install();
 	}
 
-	public function add( array $row ): int {
+	/**
+	 * Record a detection. Returns the finding ID and what happened to it.
+	 *
+	 * @return array{id: int, outcome: string} outcome: new | updated | reinfection | ignored
+	 */
+	public function upsert( array $detection ): array {
 		global $wpdb;
-		$now = current_time( 'mysql', true );
-		$wpdb->insert( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-			self::table(),
-			array(
-				'scan_id'        => (string) ( $row['scan_id'] ?? '' ),
-				'source'         => (string) ( $row['source'] ?? 'builtin' ),
-				'file'           => (string) $row['file'],
-				'file_hash'      => (string) ( $row['file_hash'] ?? '' ),
-				'signature_id'   => (string) $row['signature_id'],
-				'signature_name' => (string) ( $row['signature_name'] ?? $row['signature_id'] ),
-				'severity'       => (string) ( $row['severity'] ?? 'medium' ),
-				'line'           => (int) ( $row['line'] ?? 0 ),
-				'excerpt'        => (string) ( $row['excerpt'] ?? '' ),
-				'status'         => 'open',
-				'detected_at'    => $now,
-				'updated_at'     => $now,
-			)
+		$table = self::table();
+		$row   = self::normalize( $detection );
+		$now   = current_time( 'mysql', true );
+
+		// phpcs:disable WordPress.DB
+		$existing = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT id, status, file_hash FROM {$table} WHERE object_type = %s AND object_ref = %s AND signature_id = %s ORDER BY id DESC LIMIT 1",
+				$row['object_type'],
+				$row['object_ref'],
+				$row['signature_id']
+			),
+			ARRAY_A
 		);
-		return (int) $wpdb->insert_id;
+		// phpcs:enable
+
+		if ( $existing ) {
+			$id = (int) $existing['id'];
+
+			// An ignore is bound to the content it was made for.
+			if ( 'ignored' === $existing['status'] && ( '' === $row['file_hash'] || $existing['file_hash'] === $row['file_hash'] ) ) {
+				return array( 'id' => $id, 'outcome' => 'ignored' );
+			}
+
+			$outcome = 'updated';
+			$update  = $row;
+			unset( $update['object_type'], $update['object_ref'], $update['signature_id'] );
+			$update['last_seen_at'] = $now;
+			$update['updated_at']   = $now;
+
+			if ( 'open' !== $existing['status'] ) {
+				$outcome                  = in_array( $existing['status'], array( 'resolved', 'quarantined' ), true ) ? 'reinfection' : 'updated';
+				$update['status']         = 'open';
+				$update['quarantine_key'] = '';
+			}
+
+			$wpdb->update( $table, $update, array( 'id' => $id ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			if ( 'open' !== $existing['status'] ) {
+				$wpdb->query( $wpdb->prepare( "UPDATE {$table} SET occurrences = occurrences + 1 WHERE id = %d", $id ) ); // phpcs:ignore WordPress.DB
+			}
+			return array( 'id' => $id, 'outcome' => $outcome );
+		}
+
+		$row['status']       = 'open';
+		$row['detected_at']  = $now;
+		$row['last_seen_at'] = $now;
+		$row['updated_at']   = $now;
+		$wpdb->insert( $table, $row ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		return array( 'id' => (int) $wpdb->insert_id, 'outcome' => 'new' );
+	}
+
+	/** Backwards-compatible insert used by 0.x code paths. */
+	public function add( array $row ): int {
+		return $this->upsert( $row )['id'];
+	}
+
+	private static function normalize( array $d ): array {
+		$row = array_intersect_key( $d, array_flip( self::FIELDS ) );
+
+		$row['object_type'] = (string) ( $row['object_type'] ?? 'file' );
+		$row['file']        = (string) ( $row['file'] ?? '' );
+		$row['object_ref']  = substr( (string) ( $row['object_ref'] ?? $row['file'] ), 0, 191 );
+		$row['source']      = (string) ( $row['source'] ?? 'signature' );
+		$row['severity']    = isset( Signatures::SEVERITIES[ $row['severity'] ?? '' ] ) ? $row['severity'] : 'medium';
+		$row['verdict']     = in_array( $row['verdict'] ?? '', self::VERDICTS, true ) ? $row['verdict'] : 'malicious';
+		$row['confidence']  = max( 0, min( 100, (int) ( $row['confidence'] ?? 80 ) ) );
+		$row['line']        = max( 0, (int) ( $row['line'] ?? 0 ) );
+		foreach ( array( 'scan_id', 'file_hash', 'signature_id', 'signature_name', 'family', 'excerpt', 'evidence', 'remediation' ) as $text ) {
+			$row[ $text ] = (string) ( $row[ $text ] ?? '' );
+		}
+		$row['signature_name'] = substr( '' !== $row['signature_name'] ? $row['signature_name'] : $row['signature_id'], 0, 255 );
+		$row['family']         = substr( $row['family'], 0, 100 );
+		return $row;
+	}
+
+	/**
+	 * After a completed scan, close open findings it covered but did not see again.
+	 *
+	 * @param string[] $sources     Layers the scan ran.
+	 * @param string   $object_type Object type the scan covered.
+	 * @param string   $prefix      Limit to objects whose ref starts with this (custom-directory scans).
+	 * @return int Number of findings resolved.
+	 */
+	public function resolve_stale( string $scan_id, array $sources, string $object_type = 'file', string $prefix = '' ): int {
+		global $wpdb;
+		if ( ! $sources ) {
+			return 0;
+		}
+		$table        = self::table();
+		$placeholders = implode( ',', array_fill( 0, count( $sources ), '%s' ) );
+		$args         = array_merge( array( current_time( 'mysql', true ), $object_type, $scan_id ), $sources );
+		$sql          = "UPDATE {$table} SET status = 'resolved', updated_at = %s WHERE status = 'open' AND object_type = %s AND scan_id <> %s AND source IN ({$placeholders})";
+		if ( '' !== $prefix ) {
+			$sql   .= ' AND object_ref LIKE %s';
+			$args[] = $wpdb->esc_like( $prefix ) . '%';
+		}
+		return (int) $wpdb->query( $wpdb->prepare( $sql, $args ) ); // phpcs:ignore WordPress.DB
+	}
+
+	/**
+	 * Mark that the open findings of skipped (unchanged, cached) files are still current.
+	 *
+	 * @param string[] $refs
+	 */
+	public function touch( array $refs, string $scan_id ): void {
+		global $wpdb;
+		if ( ! $refs ) {
+			return;
+		}
+		$table        = self::table();
+		$placeholders = implode( ',', array_fill( 0, count( $refs ), '%s' ) );
+		$wpdb->query( $wpdb->prepare( "UPDATE {$table} SET scan_id = %s WHERE status = 'open' AND object_type = 'file' AND object_ref IN ({$placeholders})", array_merge( array( $scan_id ), $refs ) ) ); // phpcs:ignore WordPress.DB
 	}
 
 	public function get( int $id ): ?array {
@@ -80,23 +160,41 @@ final class Findings {
 		return $row ?: null;
 	}
 
-	/** @return array{rows: array<int, array>, total: int} */
-	public function query( string $status = 'open', int $page = 1, int $per_page = 50 ): array {
+	/**
+	 * @param array{status?: string, source?: string, object_type?: string, severity?: string, search?: string} $filters
+	 * @return array{rows: array<int, array>, total: int}
+	 */
+	public function query( $filters = 'open', int $page = 1, int $per_page = 50 ): array {
 		global $wpdb;
-		$table  = self::table();
-		$status = in_array( $status, self::STATUSES, true ) ? $status : 'open';
-		$offset = max( 0, $page - 1 ) * $per_page;
+		$filters = is_array( $filters ) ? $filters : array( 'status' => (string) $filters );
+		$table   = self::table();
+		$where   = array( 'status = %s' );
+		$args    = array( in_array( $filters['status'] ?? 'open', self::STATUSES, true ) ? $filters['status'] : 'open' );
+
+		foreach ( array( 'source', 'object_type', 'severity' ) as $column ) {
+			if ( ! empty( $filters[ $column ] ) ) {
+				$where[] = "{$column} = %s";
+				$args[]  = (string) $filters[ $column ];
+			}
+		}
+		if ( ! empty( $filters['search'] ) ) {
+			$like    = '%' . $wpdb->esc_like( (string) $filters['search'] ) . '%';
+			$where[] = '(file LIKE %s OR signature_name LIKE %s OR signature_id LIKE %s)';
+			array_push( $args, $like, $like, $like );
+		}
+
+		$where_sql = implode( ' AND ', $where );
+		$per_page  = max( 1, $per_page );
+		$offset    = max( 0, $page - 1 ) * $per_page;
 
 		// phpcs:disable WordPress.DB
-		$total = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE status = %s", $status ) );
+		$total = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE {$where_sql}", $args ) );
 		$rows  = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT * FROM {$table} WHERE status = %s
-				ORDER BY FIELD(severity, 'critical', 'high', 'medium', 'low'), file ASC
+				"SELECT * FROM {$table} WHERE {$where_sql}
+				ORDER BY FIELD(severity, 'critical', 'high', 'medium', 'low'), FIELD(verdict, 'malicious', 'suspicious'), confidence DESC, file ASC
 				LIMIT %d OFFSET %d",
-				$status,
-				$per_page,
-				$offset
+				array_merge( $args, array( $per_page, $offset ) )
 			),
 			ARRAY_A
 		);
@@ -105,16 +203,32 @@ final class Findings {
 		return array( 'rows' => $rows ?: array(), 'total' => $total );
 	}
 
-	/** @return array<string, int> Open findings per severity, plus 'total'. */
+	/** @return array<string, int> Open findings per severity, plus 'total', 'malicious', 'suspicious'. */
 	public function open_counts(): array {
 		global $wpdb;
 		$table  = self::table();
-		$counts = array_fill_keys( array_keys( Signatures::SEVERITIES ), 0 );
-		$rows   = $wpdb->get_results( "SELECT severity, COUNT(*) AS n FROM {$table} WHERE status = 'open' GROUP BY severity", ARRAY_A ); // phpcs:ignore WordPress.DB
+		$counts = array_fill_keys( array_merge( array_keys( Signatures::SEVERITIES ), self::VERDICTS ), 0 );
+		$rows   = $wpdb->get_results( "SELECT severity, verdict, COUNT(*) AS n FROM {$table} WHERE status = 'open' GROUP BY severity, verdict", ARRAY_A ); // phpcs:ignore WordPress.DB
 		foreach ( (array) $rows as $row ) {
-			$counts[ $row['severity'] ] = (int) $row['n'];
+			if ( isset( $counts[ $row['severity'] ] ) ) {
+				$counts[ $row['severity'] ] += (int) $row['n'];
+			}
+			if ( isset( $counts[ $row['verdict'] ] ) ) {
+				$counts[ $row['verdict'] ] += (int) $row['n'];
+			}
 		}
-		$counts['total'] = array_sum( $counts );
+		$counts['total'] = $counts['malicious'] + $counts['suspicious'];
+		return $counts;
+	}
+
+	/** @return array<string, int> Number of findings per status. */
+	public function status_counts(): array {
+		global $wpdb;
+		$table  = self::table();
+		$counts = array_fill_keys( self::STATUSES, 0 );
+		foreach ( (array) $wpdb->get_results( "SELECT status, COUNT(*) AS n FROM {$table} GROUP BY status", ARRAY_A ) as $row ) { // phpcs:ignore WordPress.DB
+			$counts[ $row['status'] ] = (int) $row['n'];
+		}
 		return $counts;
 	}
 
@@ -123,7 +237,7 @@ final class Findings {
 		if ( ! in_array( $status, self::STATUSES, true ) ) {
 			return false;
 		}
-		return false !== $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		return (bool) $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			self::table(),
 			array(
 				'status'         => $status,
@@ -134,21 +248,39 @@ final class Findings {
 		);
 	}
 
-	/** Mark every other open finding on the same file with the same status (one file, many signatures). */
-	public function set_status_for_file( string $file, string $status, string $quarantine_key = '' ): void {
+	/** Move every open finding on a file to a new status (one file, many signatures). */
+	public function set_status_for_file( string $file, string $status, string $quarantine_key = '' ): int {
 		global $wpdb;
-		$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		return (int) $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			self::table(),
 			array(
 				'status'         => $status,
 				'quarantine_key' => $quarantine_key,
 				'updated_at'     => current_time( 'mysql', true ),
 			),
-			array( 'file' => $file, 'status' => 'open' )
+			array(
+				'object_type' => 'file',
+				'object_ref'  => substr( $file, 0, 191 ),
+				'status'      => 'open',
+			)
 		);
 	}
 
-	/** Drop open findings from the given sources before they are re-detected. */
+	/** Move findings linked to a quarantine entry to a new status once it is restored or deleted. */
+	public function release_quarantine( string $key, string $status ): void {
+		global $wpdb;
+		$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			self::table(),
+			array(
+				'status'         => $status,
+				'quarantine_key' => '',
+				'updated_at'     => current_time( 'mysql', true ),
+			),
+			array( 'quarantine_key' => $key )
+		);
+	}
+
+	/** Drop open findings from the given sources (used for full re-imports such as Imunify sync). */
 	public function clear_open( array $sources ): void {
 		global $wpdb;
 		$table        = self::table();
@@ -160,34 +292,23 @@ final class Findings {
 		global $wpdb;
 		$table = self::table();
 		return (bool) $wpdb->get_var( // phpcs:ignore WordPress.DB
-			$wpdb->prepare( "SELECT 1 FROM {$table} WHERE status = 'open' AND file = %s AND signature_id = %s LIMIT 1", $file, $signature_id )
+			$wpdb->prepare( "SELECT 1 FROM {$table} WHERE status = 'open' AND object_type = 'file' AND object_ref = %s AND signature_id = %s LIMIT 1", substr( $file, 0, 191 ), $signature_id )
 		);
 	}
 
-	/** True when an admin ignored this exact detection on this exact file content. */
-	public function is_ignored( string $file, string $signature_id, string $hash ): bool {
-		global $wpdb;
-		$table = self::table();
-		return (bool) $wpdb->get_var( // phpcs:ignore WordPress.DB
-			$wpdb->prepare(
-				"SELECT 1 FROM {$table} WHERE status = 'ignored' AND file = %s AND signature_id = %s AND file_hash = %s LIMIT 1",
-				$file,
-				$signature_id,
-				$hash
-			)
-		);
-	}
-
-	/** True when an admin ignored this detection, regardless of content (used for Imunify results, which carry no hash). */
+	/** True when an admin ignored this detection, regardless of content (for sources that carry no hash). */
 	public function is_ignored_any( string $file, string $signature_id ): bool {
 		global $wpdb;
 		$table = self::table();
 		return (bool) $wpdb->get_var( // phpcs:ignore WordPress.DB
-			$wpdb->prepare(
-				"SELECT 1 FROM {$table} WHERE status = 'ignored' AND file = %s AND signature_id = %s LIMIT 1",
-				$file,
-				$signature_id
-			)
+			$wpdb->prepare( "SELECT 1 FROM {$table} WHERE status = 'ignored' AND object_ref = %s AND signature_id = %s LIMIT 1", substr( $file, 0, 191 ), $signature_id )
 		);
+	}
+
+	/** Delete resolved findings older than $days to keep the table small. */
+	public function prune_resolved( int $days ): int {
+		global $wpdb;
+		$table = self::table();
+		return (int) $wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE status = 'resolved' AND updated_at < %s", gmdate( 'Y-m-d H:i:s', time() - $days * DAY_IN_SECONDS ) ) ); // phpcs:ignore WordPress.DB
 	}
 }

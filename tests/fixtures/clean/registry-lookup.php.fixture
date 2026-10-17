@@ -1,0 +1,8 @@
+<?php
+// Widget-style registry: callback looked up by request key, never taken from it.
+global $myplugin_handlers;
+$id      = $_POST['widget_id'];
+$handler = $myplugin_handlers[ $id ];
+if ( $handler ) {
+	call_user_func_array( $handler['callback'], $handler['params'] );
+}

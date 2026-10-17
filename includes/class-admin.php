@@ -10,7 +10,6 @@ namespace Fckmaleware;
 final class Admin {
 
 	private const SLUG       = 'fckmaleware';
-	private const CAPABILITY = 'manage_options';
 
 	/** @var Plugin */
 	private $plugin;
@@ -39,7 +38,7 @@ final class Admin {
 		add_menu_page(
 			__( 'FckMaleware', 'fckmaleware' ),
 			__( 'FckMaleware', 'fckmaleware' ) . $badge,
-			self::CAPABILITY,
+			Plugin::capability(),
 			self::SLUG,
 			array( $this, 'render' ),
 			'dashicons-shield',
@@ -76,14 +75,14 @@ final class Admin {
 
 	private function ajax_guard(): void {
 		check_ajax_referer( 'fckmw_scan' );
-		if ( ! current_user_can( self::CAPABILITY ) ) {
+		if ( ! current_user_can( Plugin::capability() ) ) {
 			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'fckmaleware' ) ), 403 );
 		}
 	}
 
 	public function ajax_scan_start(): void {
 		$this->ajax_guard();
-		$state = $this->plugin->scanner()->start( 'manual' );
+		$state = $this->plugin->scanner()->start( 'standard', 'manual' );
 		if ( is_wp_error( $state ) ) {
 			wp_send_json_error( array( 'message' => $state->get_error_message() ) );
 		}
@@ -103,7 +102,7 @@ final class Admin {
 	// --- Form handlers ------------------------------------------------------
 
 	private function form_guard( string $action ): void {
-		if ( ! current_user_can( self::CAPABILITY ) ) {
+		if ( ! current_user_can( Plugin::capability() ) ) {
 			wp_die( esc_html__( 'Permission denied.', 'fckmaleware' ), 403 );
 		}
 		check_admin_referer( $action );
@@ -158,7 +157,7 @@ final class Admin {
 	public function handle_settings(): void {
 		$this->form_guard( 'fckmw_settings' );
 		$before = Settings::all();
-		$after  = Settings::update( wp_unslash( (array) ( $_POST['fckmw'] ?? array() ) ) ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- sanitized in Settings::sanitize().
+		$after  = Settings::update( wp_unslash( (array) ( $_POST['fckmw'] ?? array() ) ), array( 'core_integrity', 'scan_images', 'block_uploads_php', 'email_alerts', 'imunify_enabled', 'imunify_use_sudo', 'imunify_sync_scan' ) ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- sanitized in Settings::sanitize().
 
 		if ( $before['schedule'] !== $after['schedule'] ) {
 			Plugin::reschedule();
@@ -209,7 +208,7 @@ final class Admin {
 	// --- Rendering ----------------------------------------------------------
 
 	public function render(): void {
-		if ( ! current_user_can( self::CAPABILITY ) ) {
+		if ( ! current_user_can( Plugin::capability() ) ) {
 			return;
 		}
 		$tabs = array(
@@ -430,7 +429,7 @@ final class Admin {
 			)
 		);
 		if ( $signatures->invalid() ) {
-			echo '<div class="notice notice-warning inline"><p>' . esc_html( sprintf( /* translators: %s: ids */ __( 'Skipped signatures with invalid patterns: %s', 'fckmaleware' ), implode( ', ', $signatures->invalid() ) ) ) . '</p></div>';
+			echo '<div class="notice notice-warning inline"><p>' . esc_html( sprintf( /* translators: %s: ids */ __( 'Skipped signatures with invalid patterns: %s', 'fckmaleware' ), implode( ', ', array_keys( $signatures->invalid() ) ) ) ) . '</p></div>';
 		}
 		echo '<table class="widefat striped"><thead><tr><th>ID</th><th>' . esc_html__( 'Name', 'fckmaleware' ) . '</th><th>' . esc_html__( 'Severity', 'fckmaleware' ) . '</th><th>' . esc_html__( 'File types', 'fckmaleware' ) . '</th><th>' . esc_html__( 'Description', 'fckmaleware' ) . '</th></tr></thead><tbody>';
 		foreach ( $signatures->all() as $sig ) {

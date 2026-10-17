@@ -1,0 +1,7 @@
+<?php
+// Admin page router: include from a fixed directory after validation.
+$page = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'general';
+$file = __DIR__ . '/views/' . $page . '.php';
+if ( 0 === validate_file( $page ) && file_exists( $file ) ) {
+	include $file;
+}

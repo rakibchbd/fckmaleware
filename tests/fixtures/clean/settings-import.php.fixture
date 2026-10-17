@@ -1,0 +1,10 @@
+<?php
+// Settings import: decodes an uploaded JSON blob, never executes it.
+function myplugin_import() {
+	check_admin_referer( 'myplugin_import' );
+	$raw  = base64_decode( sanitize_text_field( wp_unslash( $_POST['settings'] ) ) );
+	$data = json_decode( $raw, true );
+	if ( is_array( $data ) ) {
+		update_option( 'myplugin_settings', array_map( 'sanitize_text_field', $data ) );
+	}
+}

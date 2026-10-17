@@ -18,11 +18,7 @@ jobs:
           coverage: none
       - name: Lint
         run: find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 php -l
-      - name: Signature JSON is up to date
-        run: |
-          cp signatures/signatures.json /tmp/before.json
-          php tools/build-signatures.php
-          # The version field is the build date; compare everything else.
-          diff <(grep -v '"version"' /tmp/before.json) <(grep -v '"version"' signatures/signatures.json)
+      - name: Signature database is built from sources and valid
+        run: php tools/build-signatures.php --check
       - name: Unit tests
         run: php tests/run.php
