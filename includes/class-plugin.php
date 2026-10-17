@@ -57,6 +57,7 @@ final class Plugin {
 		$this->monitor()->register();
 		$this->remediation()->register();
 		$this->notifier()->register();
+		$this->hardening()->register();
 
 		if ( is_admin() ) {
 			( new Admin( $this ) )->register();
@@ -209,6 +210,15 @@ final class Plugin {
 
 	public function imunify(): Imunify {
 		return new Imunify( (string) Settings::get( 'imunify_binary' ), (bool) Settings::get( 'imunify_use_sudo' ) );
+	}
+
+	public function hardening(): Hardening {
+		return $this->service(
+			'hardening',
+			static function () {
+				return new Hardening();
+			}
+		);
 	}
 
 	public function notifier(): Notifier {

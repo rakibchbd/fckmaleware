@@ -333,6 +333,45 @@ final class CLI {
 	}
 
 	/**
+	 * Show hardening status, or enable/disable a hardening rule.
+	 *
+	 * ## OPTIONS
+	 *
+	 * [<action>]
+	 * : status, enable or disable.
+	 * ---
+	 * default: status
+	 * options:
+	 *   - status
+	 *   - enable
+	 *   - disable
+	 * ---
+	 *
+	 * [<rule>]
+	 * : Rule id for enable/disable (see status).
+	 *
+	 * @when after_wp_load
+	 */
+	public function hardening( array $args ): void {
+		$hardening = $this->plugin->hardening();
+		$action    = $args[0] ?? 'status';
+		if ( 'status' !== $action ) {
+			$result = $hardening->set( (string) ( $args[1] ?? '' ), 'enable' === $action );
+			if ( is_wp_error( $result ) ) {
+				\WP_CLI::error( $result->get_error_message() );
+			}
+			\WP_CLI::success( ucfirst( $action ) . "d {$args[1]}." );
+			return;
+		}
+		$catalog = Hardening::catalog();
+		$rows    = array();
+		foreach ( $hardening->status( true ) as $id => $status ) {
+			$rows[] = array( 'id' => $id, 'type' => $catalog[ $id ]['toggle'] ? 'rule' : 'check', 'state' => $status['state'], 'detail' => $status['detail'] );
+		}
+		\WP_CLI\Utils\format_items( 'table', $rows, array( 'id', 'type', 'state', 'detail' ) );
+	}
+
+	/**
 	 * Send a test alert on every enabled channel (email, webhook).
 	 *
 	 * @subcommand notify-test
