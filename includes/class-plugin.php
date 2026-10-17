@@ -21,6 +21,7 @@ final class Plugin {
 	public const CRON_SCAN     = 'fckmw_scheduled_scan';
 	public const CRON_CONTINUE = 'fckmw_scan_continue';
 	public const CRON_DAILY    = 'fckmw_daily_maintenance';
+	public const CRON_DB       = 'fckmw_db_scan_continue';
 
 	/** @var Plugin|null */
 	private static $instance;
@@ -48,9 +49,11 @@ final class Plugin {
 		add_action( self::CRON_SCAN, array( $this, 'run_scheduled_scan' ) );
 		add_action( self::CRON_CONTINUE, array( $this, 'continue_scan' ) );
 		add_action( self::CRON_DAILY, array( $this, 'daily_maintenance' ) );
+		add_action( self::CRON_DB, array( $this, 'continue_db_scan' ) );
 		add_action( 'fckmw_scan_complete', array( $this, 'on_scan_complete' ) );
 
 		( new Updater() )->register();
+		$this->monitor()->register();
 
 		if ( is_admin() ) {
 			( new Admin( $this ) )->register();
@@ -151,6 +154,33 @@ final class Plugin {
 			'scanner',
 			function () {
 				return new Scanner( array( $this, 'engine' ), $this->findings(), $this->file_cache() );
+			}
+		);
+	}
+
+	public function db_scanner(): DbScanner {
+		return $this->service(
+			'db_scanner',
+			function () {
+				return new DbScanner( $this->signatures(), $this->findings() );
+			}
+		);
+	}
+
+	public function persistence(): Persistence {
+		return $this->service(
+			'persistence',
+			function () {
+				return new Persistence( $this->findings(), $this->signatures() );
+			}
+		);
+	}
+
+	public function monitor(): Monitor {
+		return $this->service(
+			'monitor',
+			function () {
+				return new Monitor( $this );
 			}
 		);
 	}
@@ -271,6 +301,20 @@ final class Plugin {
 		if ( Settings::get( 'imunify_enabled' ) && Settings::get( 'imunify_sync_scan' ) ) {
 			$this->sync_imunify();
 		}
+		// A scheduled file scan is followed by the database scan and persistence checks.
+		if ( 'scheduled' === $state['trigger'] && Settings::get( 'scheduled_db_scan' ) ) {
+			$this->persistence()->run( 'scheduled' );
+			if ( ! is_wp_error( $this->db_scanner()->start( 'scheduled' ) ) ) {
+				$this->continue_db_scan();
+			}
+		}
+	}
+
+	public function continue_db_scan(): void {
+		$state = $this->db_scanner()->step( 20.0 );
+		if ( 'running' === $state['status'] && ! wp_next_scheduled( self::CRON_DB ) ) {
+			wp_schedule_single_event( time() + 30, self::CRON_DB );
+		}
 	}
 
 	public function daily_maintenance(): void {
@@ -331,5 +375,7 @@ final class Plugin {
 		wp_clear_scheduled_hook( self::CRON_SCAN );
 		wp_clear_scheduled_hook( self::CRON_CONTINUE );
 		wp_clear_scheduled_hook( self::CRON_DAILY );
+		wp_clear_scheduled_hook( self::CRON_DB );
+		wp_clear_scheduled_hook( Monitor::CRON_QUEUE );
 	}
 }

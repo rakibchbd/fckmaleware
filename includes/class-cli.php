@@ -99,6 +99,32 @@ final class CLI {
 	}
 
 	/**
+	 * Scan posts, options and comments (every site on multisite) for injected code.
+	 *
+	 * @subcommand db-scan
+	 * @when after_wp_load
+	 */
+	public function db_scan(): void {
+		$state = $this->plugin->db_scanner()->run( 'cli' );
+		if ( is_wp_error( $state ) ) {
+			\WP_CLI::error( $state->get_error_message() );
+		}
+		\WP_CLI::success( sprintf( 'Database scan complete: %d candidate rows, %d detections, %d new, %d resolved.', $state['rows'], $state['found'], $state['new'], $state['resolved'] ) );
+		$this->findings( array(), array( 'source' => 'database' ) );
+	}
+
+	/**
+	 * Check for persistence: hidden or new admins, role changes, cron payloads, eval()'d hook callbacks.
+	 *
+	 * @when after_wp_load
+	 */
+	public function persistence(): void {
+		$result = $this->plugin->persistence()->run( 'cli' );
+		\WP_CLI::success( sprintf( 'Persistence check: %d findings, %d new, %d resolved.', $result['found'], $result['new'], $result['resolved'] ) );
+		$this->findings( array(), array( 'source' => 'behaviour' ) );
+	}
+
+	/**
 	 * List findings.
 	 *
 	 * ## OPTIONS
@@ -114,6 +140,9 @@ final class CLI {
 	 *   - resolved
 	 * ---
 	 *
+	 * [--source=<source>]
+	 * : Only findings from one layer (signature, heuristic, integrity, location, database, behaviour, imunify, ai).
+	 *
 	 * [--format=<format>]
 	 * : Output format.
 	 * ---
@@ -127,7 +156,7 @@ final class CLI {
 	 * @when after_wp_load
 	 */
 	public function findings( array $args, array $assoc ): void {
-		$result = $this->plugin->findings()->query( $assoc['status'] ?? 'open', 1, 10000 );
+		$result = $this->plugin->findings()->query( array( 'status' => $assoc['status'] ?? 'open', 'source' => $assoc['source'] ?? '' ), 1, 10000 );
 		if ( ! $result['rows'] ) {
 			\WP_CLI::success( 'No findings.' );
 			return;
