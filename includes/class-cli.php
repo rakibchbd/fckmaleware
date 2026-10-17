@@ -408,6 +408,47 @@ final class CLI {
 	}
 
 	/**
+	 * Prepare voluntary feedback: a pre-filled GitHub issue link, or an anonymous statistics bundle.
+	 *
+	 * Nothing is sent: you open the link or attach the bundle yourself.
+	 *
+	 * ## OPTIONS
+	 *
+	 * <action>
+	 * : report or export.
+	 * ---
+	 * options:
+	 *   - report
+	 *   - export
+	 * ---
+	 *
+	 * [<id>]
+	 * : Finding ID (for report).
+	 *
+	 * [--type=<type>]
+	 * : false_positive or confirmed.
+	 * ---
+	 * default: false_positive
+	 * ---
+	 *
+	 * [--include-excerpt]
+	 * : Add a short, redacted excerpt to the report.
+	 *
+	 * @when after_wp_load
+	 */
+	public function feedback( array $args, array $assoc ): void {
+		if ( 'export' === $args[0] ) {
+			\WP_CLI::log( (string) wp_json_encode( Feedback::stats_bundle( $this->plugin ), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) );
+			return;
+		}
+		$finding = $this->plugin->findings()->get( (int) ( $args[1] ?? 0 ) );
+		if ( ! $finding ) {
+			\WP_CLI::error( 'Finding not found.' );
+		}
+		\WP_CLI::log( Feedback::issue_url( $finding, 'confirmed' === ( $assoc['type'] ?? '' ) ? 'confirmed' : 'false_positive', isset( $assoc['include-excerpt'] ), $this->plugin ) );
+	}
+
+	/**
 	 * Send a test alert on every enabled channel (email, webhook).
 	 *
 	 * @subcommand notify-test

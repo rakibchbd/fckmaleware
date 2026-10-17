@@ -1,0 +1,62 @@
+{
+    "urlhaus": {
+        "name": "URLhaus (abuse.ch)",
+        "url": "https://urlhaus.abuse.ch/downloads/json_recent/",
+        "license": "CC0-1.0",
+        "terms": "abuse.ch publishes URLhaus data for commercial and non-commercial use without restriction (CC0). Re-check https://urlhaus.abuse.ch/api/ before each release.",
+        "auth": "none",
+        "use": "Hostnames from web-injection campaigns (ClearFake, SocGholish/FakeUpdates, Balada, Keitaro, WordPress-tagged) become host signatures for files and database content. Payload-hosting entries (IoT botnets, loaders) are ignored: they do not appear in WordPress content.",
+        "reliability": "high for listed URLs; host-level matching excludes shared platforms",
+        "enabled": true
+    },
+    "malwarebazaar": {
+        "name": "MalwareBazaar (abuse.ch)",
+        "url": "https://mb-api.abuse.ch/api/v1/",
+        "license": "CC0-1.0",
+        "terms": "Free API; requires an Auth-Key (free abuse.ch account) since 2025. Data CC0. Set ABUSECH_AUTH_KEY.",
+        "auth": "ABUSECH_AUTH_KEY",
+        "use": "SHA-256 hashes of samples tagged php/webshell/wordpress become hash signatures (exact match, essentially no false positives).",
+        "reliability": "high (exact hashes)",
+        "enabled": true
+    },
+    "signature-base": {
+        "name": "Neo23x0/signature-base (Florian Roth, Nextron Systems)",
+        "url": "https://raw.githubusercontent.com/Neo23x0/signature-base/master/yara/thor-webshells.yar",
+        "license": "DRL-1.1",
+        "terms": "Detection Rule License 1.1: redistribution and modification allowed; the author, reference and license information supplied with each rule must be retained (kept in each signature's source/description).",
+        "auth": "none",
+        "use": "PHP web shell YARA rules whose strings are plain text and whose condition is any/all/N of them are converted to regex signatures. Hex strings, byte-offset conditions and wide strings are skipped.",
+        "reliability": "curated; every converted rule must match nothing in the clean corpus",
+        "enabled": true
+    },
+    "community": {
+        "name": "Community submissions",
+        "url": "intel/community/*.json (pull requests)",
+        "license": "GPL-3.0-or-later (contributors agree by submitting)",
+        "terms": "Submitted through pull requests; never applied without maintainer approval.",
+        "auth": "none",
+        "use": "Signatures in the plugin's schema, run through the same validation and corpus tests.",
+        "reliability": "varies; reviewed",
+        "enabled": true
+    },
+    "wpscan": {
+        "name": "WPScan vulnerability database",
+        "url": "https://wpscan.com/api",
+        "license": "Commercial terms; free tier limited to non-commercial use",
+        "terms": "Not integrated: redistributing data in a free plugin used commercially would breach the free-tier terms.",
+        "auth": "token",
+        "use": "none",
+        "reliability": "n/a",
+        "enabled": false
+    },
+    "imunify360": {
+        "name": "Imunify360 signatures",
+        "url": "n/a",
+        "license": "Proprietary",
+        "terms": "Never copied or redistributed. FCK Malware only imports the per-site detection results the local agent reports.",
+        "auth": "n/a",
+        "use": "none",
+        "reliability": "n/a",
+        "enabled": false
+    }
+}
