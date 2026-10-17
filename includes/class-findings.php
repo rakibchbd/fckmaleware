@@ -79,7 +79,7 @@ final class Findings {
 			if ( 'open' !== $existing['status'] ) {
 				$wpdb->query( $wpdb->prepare( "UPDATE {$table} SET occurrences = occurrences + 1 WHERE id = %d", $id ) ); // phpcs:ignore WordPress.DB
 			}
-			return array( 'id' => $id, 'outcome' => $outcome );
+			return self::recorded( $row, array( 'id' => $id, 'outcome' => $outcome ) );
 		}
 
 		$row['status']       = 'open';
@@ -87,7 +87,18 @@ final class Findings {
 		$row['last_seen_at'] = $now;
 		$row['updated_at']   = $now;
 		$wpdb->insert( $table, $row ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-		return array( 'id' => (int) $wpdb->insert_id, 'outcome' => 'new' );
+		return self::recorded( $row, array( 'id' => (int) $wpdb->insert_id, 'outcome' => 'new' ) );
+	}
+
+	private static function recorded( array $row, array $result ): array {
+		/**
+		 * Fires after a detection was stored (new, updated or reinfection).
+		 *
+		 * @param array $row    Normalized finding.
+		 * @param array $result id and outcome.
+		 */
+		do_action( 'fckmw_finding_recorded', $row, $result );
+		return $result;
 	}
 
 	/** Backwards-compatible insert used by 0.x code paths. */

@@ -33,7 +33,15 @@ if ( ! function_exists( 'is_wp_error' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_parse_url' ) ) {
+	function wp_parse_url( $url, $component = -1 ) {
+		return parse_url( $url, $component );
+	}
+}
+
 require FCKMW_ROOT . '/includes/class-signatures.php';
+require FCKMW_ROOT . '/includes/class-feed.php';
+require FCKMW_ROOT . '/includes/class-notifier.php';
 require FCKMW_ROOT . '/includes/class-imunify.php';
 require FCKMW_ROOT . '/includes/detection/class-heuristics.php';
 require FCKMW_ROOT . '/includes/detection/class-file-context.php';

@@ -56,6 +56,7 @@ final class Plugin {
 		$this->signature_updater()->register();
 		$this->monitor()->register();
 		$this->remediation()->register();
+		$this->notifier()->register();
 
 		if ( is_admin() ) {
 			( new Admin( $this ) )->register();
@@ -208,6 +209,15 @@ final class Plugin {
 
 	public function imunify(): Imunify {
 		return new Imunify( (string) Settings::get( 'imunify_binary' ), (bool) Settings::get( 'imunify_use_sudo' ) );
+	}
+
+	public function notifier(): Notifier {
+		return $this->service(
+			'notifier',
+			static function () {
+				return new Notifier();
+			}
+		);
 	}
 
 	public function remediation(): Remediation {
@@ -387,5 +397,6 @@ final class Plugin {
 		wp_clear_scheduled_hook( self::CRON_DB );
 		wp_clear_scheduled_hook( Monitor::CRON_QUEUE );
 		wp_clear_scheduled_hook( SignatureUpdater::CRON );
+		wp_clear_scheduled_hook( Notifier::CRON );
 	}
 }

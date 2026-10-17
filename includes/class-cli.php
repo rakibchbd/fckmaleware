@@ -333,6 +333,19 @@ final class CLI {
 	}
 
 	/**
+	 * Send a test alert on every enabled channel (email, webhook).
+	 *
+	 * @subcommand notify-test
+	 * @when after_wp_load
+	 */
+	public function notify_test(): void {
+		$this->plugin->notifier()->send_test();
+		foreach ( ActivityLog::query( array( 'type' => 'notify.' ), 1, 3 )['rows'] as $row ) {
+			\WP_CLI::log( "{$row['type']}: {$row['message']}" );
+		}
+	}
+
+	/**
 	 * Talk to the Imunify360 agent.
 	 *
 	 * ## OPTIONS

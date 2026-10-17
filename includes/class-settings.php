@@ -45,6 +45,7 @@ final class Settings {
 			'notify_cooldown_hours'    => array( 'int', 24, array( 1, 168 ) ),
 			'webhook_url'              => array( 'url', '' ),
 			'dashboard_notices'        => array( 'bool', true ),
+			'notify_scan_complete'     => array( 'bool', false ),
 			// Signature updates.
 			'signature_updates'        => array( 'bool', true ),
 			// Imunify360.
