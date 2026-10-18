@@ -57,7 +57,7 @@ final class Findings extends Page {
 
 		$actions = '';
 		if ( $statuses['open'] ) {
-			$actions = '<button type="button" class="button button-primary" data-fckmw-bulk-eligible data-preview="' . esc_attr( Overview::eligible_preview_text() ) . '"><span class="dashicons dashicons-lock" aria-hidden="true"></span>' . esc_html__( 'Quarantine all eligible', 'fckmaleware' ) . '</button>';
+			$actions = Overview::quarantine_menu( $this->plugin );
 		}
 		Ui::header( $title, __( 'Every detection with its evidence. Nothing changes until you choose an action; quarantine and repair keep a verified copy you can restore. Confirmed malware, likely malicious code, suspicious behaviour and unverified changes are labelled separately.', 'fckmaleware' ), $actions );
 

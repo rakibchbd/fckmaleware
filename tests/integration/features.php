@@ -119,6 +119,22 @@ try {
 	$check( (bool) array_filter( $events, static function ( $e ) { return 'bulk.completed' === $e['type']; } ), 'bulk job is audited' );
 	$check( is_wp_error( $plugin->bulk()->retry() ), 'retry refuses when there are no recoverable failures' );
 
+	// --- One-click quarantine scopes -----------------------------------------------
+	$check( is_wp_error( BulkJob::selection( array( 'op' => 'quarantine', 'mode' => 'eligible', 'scope' => 'everything' ) ) ), 'unknown quarantine scope is refused' );
+	$check( is_wp_error( BulkJob::selection( array( 'op' => 'accept', 'mode' => 'eligible', 'scope' => 'all' ) ) ), 'scopes apply to quarantine only' );
+	$sizes = array();
+	foreach ( array_keys( BulkJob::SCOPES ) as $scope ) {
+		$sel = BulkJob::selection( array( 'op' => 'quarantine', 'mode' => 'eligible', 'scope' => $scope, 'filters' => array( 'search' => 'ignored' ) ) );
+		$check( ! is_wp_error( $sel ) && 'open' === $sel['filters']['status'] && ! isset( $sel['filters']['search'] ), "scope {$scope}: fixed filters, user filters ignored" );
+		$sizes[ $scope ] = $plugin->bulk()->preview( $sel )['eligible'];
+	}
+	$check( $sizes['confirmed'] <= $sizes['malicious'] && $sizes['eligible'] <= $sizes['malicious'] && $sizes['malicious'] <= $sizes['all'], 'wider scopes never select fewer files' );
+	$sus  = array( 'object_type' => 'file', 'file' => 'wp-content/x.php', 'signature_id' => 'FMW-X', 'source' => 'heuristic', 'remediation' => 'review', 'verdict' => 'suspicious', 'confidence' => 50, 'status' => 'open' );
+	$check( null !== $plugin->remediation()->quarantine_eligibility( $sus, 'malicious' ) && null === $plugin->remediation()->quarantine_eligibility( $sus, 'none' ), '"malicious" scope skips suspicious files, "every flagged file" includes them' );
+	$check( null !== $plugin->remediation()->quarantine_eligibility( array( 'file' => 'wp-config.php' ) + $sus, 'none' ), 'even "every flagged file" never touches wp-config.php' );
+	$low = array( 'verdict' => 'malicious', 'confidence' => 55 ) + $sus;
+	$check( null === $plugin->remediation()->quarantine_eligibility( $low, 'malicious' ) && null !== $plugin->remediation()->quarantine_eligibility( $low, 'strict' ), '"malicious" scope ignores the confidence threshold, "eligible" applies it' );
+
 	// --- Restore never overwrites --------------------------------------------------
 	file_put_contents( "{$dir}/a-shell.php", "<?php // new legitimate file\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 	$restore = $plugin->remediation()->restore( $keys[0] );

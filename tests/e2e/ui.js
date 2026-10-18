@@ -97,6 +97,30 @@ const shots = process.argv[2] || require('os').tmpdir();
   ok(/succeeded/.test(jobText), 'bulk progress reports counts: ' + jobText);
   await page.screenshot({ path: shots + '/bulk-done.png', fullPage: false });
 
+  // One-click quarantine menu on the overview: all confirmed malware.
+  await page.goto(admin + 'fckmaleware');
+  await page.locator('.fckmw-strip-actions details.fckmw-menu > summary').click();
+  ok(await page.locator('.fckmw-strip-actions .fckmw-menu-item').count() === 4, 'quarantine menu offers four scopes');
+  await page.screenshot({ path: shots + '/quarantine-menu.png', fullPage: false });
+  await page.keyboard.press('Escape');
+  ok(!(await page.locator('.fckmw-strip-actions details.fckmw-menu').getAttribute('open')), 'Escape closes the menu');
+  await page.locator('.fckmw-strip-actions details.fckmw-menu > summary').click();
+  const confirmed = page.locator('.fckmw-strip-actions .fckmw-menu-item[data-scope="confirmed"]');
+  if (await confirmed.isEnabled()) {
+    await confirmed.click();
+    await page.locator('dialog.fckmw-dialog[open]').waitFor();
+    ok(/matching open findings/.test(await page.locator('dialog.fckmw-dialog[open]').innerText()), 'confirmed-malware scope shows a preview first');
+    if (await page.locator('dialog.fckmw-dialog[open] .fckmw-dialog-confirm').isVisible()) {
+      await confirmDialog();
+      await page.waitForFunction(() => /Bulk action finished/.test(document.querySelector('#fckmw-job .fckmw-live-text')?.textContent || ''), null, { timeout: 120000 });
+      ok(/0 failed/.test(await page.locator('#fckmw-job .fckmw-live-text').innerText()), 'one-click quarantine of confirmed malware finished without failures');
+    } else {
+      await page.keyboard.press('Escape');
+    }
+  } else {
+    ok(true, 'no confirmed malware left to quarantine');
+  }
+
   // Settings save round-trip (toggle off then on).
   await page.goto(admin + 'fckmaleware-settings');
   await page.locator('#fckmw-scan_images').setChecked(true, { force: true });

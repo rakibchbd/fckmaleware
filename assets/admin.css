@@ -410,6 +410,23 @@ a.fckmw-stat:hover { border-color: var(--fckmw-primary); }
 .fckmw-provider-head h2 { margin: 0; }
 .fckmw-provider-vendor { color: var(--fckmw-muted); font-size: 12px; }
 
+/* Split button with a menu (one-click quarantine scopes) */
+.fckmw-split { display: inline-flex; position: relative; }
+.fckmw-split > .button { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.fckmw-menu { position: relative; }
+.fckmw-menu > summary { list-style: none; border-top-left-radius: 0 !important; border-bottom-left-radius: 0 !important; margin-left: -1px; padding: 0 8px !important; cursor: pointer; height: 100%; }
+.fckmw-menu > summary::-webkit-details-marker { display: none; }
+.fckmw-menu-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; width: 340px; max-width: calc(100vw - 32px); background: #fff; border: 1px solid var(--fckmw-border); border-radius: var(--fckmw-radius); box-shadow: 0 12px 30px rgba(15, 23, 42, .15); padding: 6px; }
+.fckmw-menu-item { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; width: 100%; text-align: left; background: none; border: 0; border-radius: var(--fckmw-radius-sm); padding: 9px 10px; cursor: pointer; color: var(--fckmw-text-2); font: inherit; }
+.fckmw-menu-item:hover, .fckmw-menu-item:focus { background: var(--fckmw-primary-50); }
+.fckmw-menu-item strong { color: var(--fckmw-text); }
+.fckmw-menu-item span:not(.fckmw-menu-count) { grid-column: 1; font-size: 12px; color: var(--fckmw-muted); }
+.fckmw-menu-count { grid-column: 2; grid-row: 1; font-size: 11px; color: var(--fckmw-muted); white-space: nowrap; }
+.fckmw-menu-item.is-danger strong { color: var(--fckmw-bad); }
+.fckmw-menu-item[disabled] { opacity: .5; cursor: not-allowed; }
+.fckmw-menu-note { margin: 6px 10px 4px; font-size: 11px; color: var(--fckmw-muted); }
+.fckmw-strip-actions .fckmw-menu > summary { min-height: 30px; line-height: 28px; }
+
 /* Confirmation dialog */
 .fckmw-dialog { border: 0; border-radius: 14px; padding: 0; width: min(520px, calc(100vw - 32px)); box-shadow: 0 20px 50px rgba(15, 23, 42, .25); color: var(--fckmw-text-2); }
 .fckmw-dialog::backdrop { background: rgba(15, 23, 42, .45); }

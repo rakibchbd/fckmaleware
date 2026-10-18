@@ -66,7 +66,7 @@ final class Overview extends Page {
 		echo '<a class="button button-primary" href="' . esc_url( Ui::url( 'scanner' ) ) . '"><span class="dashicons dashicons-search" aria-hidden="true"></span>' . esc_html__( 'Start scan', 'fckmaleware' ) . '</a>';
 		echo '<a class="button" href="' . esc_url( Ui::url( 'findings' ) ) . '"><span class="dashicons dashicons-list-view" aria-hidden="true"></span>' . esc_html__( 'View findings', 'fckmaleware' ) . '</a>';
 		if ( $counts['total'] ) {
-			echo '<button type="button" class="button" data-fckmw-bulk-eligible data-href="' . esc_url( Ui::url( 'findings' ) ) . '" data-preview="' . esc_attr( self::eligible_preview_text() ) . '"><span class="dashicons dashicons-lock" aria-hidden="true"></span>' . esc_html__( 'Quarantine all', 'fckmaleware' ) . '</button>';
+			echo self::quarantine_menu( $this->plugin, 'button' ); // phpcs:ignore WordPress.Security.EscapeOutput -- escaped in quarantine_menu().
 		}
 		echo '</div></div>';
 		Ui::card_end();
@@ -87,6 +87,46 @@ final class Overview extends Page {
 		echo '</aside></div>';
 
 		Ui::footer();
+	}
+
+	/**
+	 * One-click "Quarantine all" control: the recommended scope as the main
+	 * button, the wider scopes in a menu. Each opens one confirmation that
+	 * shows exactly how many files will be moved and why others are skipped.
+	 */
+	public static function quarantine_menu( \Fckmaleware\Plugin $plugin, string $class = 'button button-primary' ): string {
+		$findings = $plugin->findings();
+		$scopes   = array(
+			'eligible'  => array( __( 'Quarantine all eligible', 'fckmaleware' ), __( 'Recommended: malicious files at or above the bulk confidence threshold.', 'fckmaleware' ), self::eligible_preview_text() ),
+			'confirmed' => array( __( 'Quarantine all confirmed malware', 'fckmaleware' ), __( 'Exact or 90%+ signature and server-scanner matches only.', 'fckmaleware' ), self::scope_preview_text() ),
+			'malicious' => array( __( 'Quarantine all malicious', 'fckmaleware' ), __( 'Every malicious verdict, including heuristic and lower-confidence ones.', 'fckmaleware' ), self::scope_preview_text() ),
+			'all'       => array( __( 'Quarantine every flagged file', 'fckmaleware' ), __( 'Also suspicious files. Can break plugins that look unusual but are legitimate.', 'fckmaleware' ), self::scope_preview_text() ),
+		);
+		$html  = '<div class="fckmw-split">';
+		$html .= sprintf( '<button type="button" class="%1$s" data-fckmw-bulk-eligible data-scope="eligible" data-href="%2$s" data-preview="%3$s"><span class="dashicons dashicons-lock" aria-hidden="true"></span>%4$s</button>', esc_attr( $class ), esc_url( Ui::url( 'findings' ) ), esc_attr( $scopes['eligible'][2] ), esc_html( $scopes['eligible'][0] ) );
+		$html .= '<details class="fckmw-menu"><summary class="' . esc_attr( $class ) . '" aria-label="' . esc_attr__( 'More quarantine options', 'fckmaleware' ) . '"><span class="dashicons dashicons-arrow-down-alt2" aria-hidden="true"></span></summary><div class="fckmw-menu-list" role="menu">';
+		foreach ( $scopes as $scope => $meta ) {
+			$filters = \Fckmaleware\BulkJob::SCOPES[ $scope ][0];
+			$count   = $findings->count( $filters );
+			$html   .= sprintf(
+				'<button type="button" role="menuitem" class="fckmw-menu-item%1$s" data-fckmw-bulk-eligible data-scope="%2$s" data-href="%3$s" data-preview="%4$s"%5$s><strong>%6$s</strong><span>%7$s</span><span class="fckmw-menu-count">%8$s</span></button>',
+				'all' === $scope ? ' is-danger' : '',
+				esc_attr( $scope ),
+				esc_url( Ui::url( 'findings' ) ),
+				esc_attr( $meta[2] ),
+				$count ? '' : ' disabled',
+				esc_html( $meta[0] ),
+				esc_html( $meta[1] ),
+				esc_html( sprintf( /* translators: %s: count */ _n( '%s open finding', '%s open findings', $count, 'fckmaleware' ), number_format_i18n( $count ) ) )
+			);
+		}
+		$html .= '<p class="fckmw-menu-note">' . esc_html__( 'Core and configuration files are never moved. Every option shows a preview first and can be rolled back as one restore point.', 'fckmaleware' ) . '</p></div></details></div>';
+		return $html;
+	}
+
+	private static function scope_preview_text(): string {
+		/* translators: 1: will be quarantined, 2: matching, 3: skipped */
+		return __( '%1$d of %2$d matching open findings will be moved to quarantine in safe batches. %3$d will be skipped (core and configuration files, database records, missing files or files already handled). Each file is re-checked before it is moved, a verified copy is kept, and the whole action can be rolled back from the Quarantine screen.', 'fckmaleware' );
 	}
 
 	/** Shared confirmation text for "Quarantine all eligible" (placeholders filled by the preview). */

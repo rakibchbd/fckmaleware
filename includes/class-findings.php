@@ -222,6 +222,10 @@ final class Findings {
 				$args[]  = (string) $filters[ $column ];
 			}
 		}
+		if ( isset( $filters['classification'] ) && 'confirmed' === $filters['classification'] ) {
+			// Same rule as classify().
+			$where[] = "verdict = 'malicious' AND confidence >= 90 AND source IN ('signature', 'imunify')";
+		}
 		if ( ! empty( $filters['confidence'] ) && isset( self::CONFIDENCE_BANDS[ $filters['confidence'] ] ) ) {
 			$where[] = 'confidence BETWEEN %d AND %d';
 			array_push( $args, self::CONFIDENCE_BANDS[ $filters['confidence'] ][0], self::CONFIDENCE_BANDS[ $filters['confidence'] ][1] );

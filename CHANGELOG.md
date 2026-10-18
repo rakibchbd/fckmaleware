@@ -27,6 +27,13 @@ A redesign of the whole admin plus safety, protection and integration work. Data
 ### Scanning and remediation
 - Bulk jobs: preview, batched resumable processing, success/failed/skipped counts, cancel, retry of recoverable failures, audit log, one restore point.
 - Bulk safety policy. Never core or configuration files; suspicious-only, low-confidence, injected-code and active-plugin heuristic findings are left for review.
+- One-click **Quarantine all** menu on the Overview and Threat Findings, each with one preview dialog:
+  - **all eligible** (recommended, the bulk safety policy);
+  - **all confirmed malware**;
+  - **all malicious**;
+  - **every flagged file**, including suspicious ones.
+
+  Core and configuration files are never moved, whichever scope is chosen.
 - Quarantine removal re-verifies the file identity (rename, re-hash, then delete). Restores use exclusive create and never overwrite.
 - `FCKMW_DATA_DIR` keeps the quarantine outside the web root, with verified migration.
 - New scan modes: plugins & themes, uploads. Scan history of the newest 100 scans. Database scans can be cancelled. Scan exclusions setting. The data folder can no longer be scanned as a custom directory.

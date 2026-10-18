@@ -515,7 +515,12 @@
 				window.location.href = button.getAttribute( 'data-href' );
 				return;
 			}
-			runBulk( { op: 'quarantine', mode: 'eligible' }, { title: button.textContent.trim(), message: button.getAttribute( 'data-preview' ), confirm: button.textContent.trim() } );
+			const menu = button.closest( 'details.fckmw-menu' );
+			if ( menu ) {
+				menu.open = false;
+			}
+			const title = ( button.querySelector( 'strong' ) || button ).textContent.trim();
+			runBulk( { op: 'quarantine', mode: 'eligible', scope: button.getAttribute( 'data-scope' ) || 'eligible' }, { title: title, message: button.getAttribute( 'data-preview' ), confirm: title } );
 		} );
 	} );
 
@@ -538,6 +543,23 @@
 			driveJob();
 		}
 	}
+
+	// Quarantine menu: close on Escape or a click outside.
+	document.addEventListener( 'click', function ( event ) {
+		document.querySelectorAll( 'details.fckmw-menu[open]' ).forEach( function ( menu ) {
+			if ( ! menu.contains( event.target ) ) {
+				menu.open = false;
+			}
+		} );
+	} );
+	document.addEventListener( 'keydown', function ( event ) {
+		if ( 'Escape' === event.key ) {
+			document.querySelectorAll( 'details.fckmw-menu[open]' ).forEach( function ( menu ) {
+				menu.open = false;
+				menu.querySelector( 'summary' ).focus();
+			} );
+		}
+	} );
 
 	// Select-all for other checkbox tables (quarantine).
 	document.querySelectorAll( '[data-check-all]' ).forEach( function ( all ) {

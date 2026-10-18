@@ -308,11 +308,16 @@ final class Remediation {
 	/**
 	 * Why a finding must not be quarantined (null when it may be).
 	 *
-	 * Hard rules apply always. With $policy (bulk "all matching / all
-	 * eligible" selections), weaker detections are left for review too.
+	 * Hard rules apply always. With a policy (bulk "all matching / all ..."
+	 * selections), weaker detections are left for review too.
+	 *
+	 * @param bool|string $policy true or "strict", "malicious", false or "none".
 	 */
-	public function quarantine_eligibility( array $finding, bool $policy = true ): ?string {
-		$file = (string) $finding['file'];
+	public function quarantine_eligibility( array $finding, $policy = true ): ?string {
+		// Policy levels: "none" (hard rules only), "malicious" (also only whole-file
+		// malicious detections) and "strict" (also confidence and active-component checks).
+		$policy = true === $policy ? 'strict' : ( false === $policy ? 'none' : (string) $policy );
+		$file   = (string) $finding['file'];
 		if ( 'file' !== $finding['object_type'] ) {
 			return __( 'Not a file (database record, account or setting): review it where it lives.', 'fckmaleware' );
 		}
@@ -325,7 +330,7 @@ final class Remediation {
 		if ( Paths::is_core( $file ) && 'FMW-INT-002' !== $finding['signature_id'] ) {
 			return __( 'WordPress core file: use "Replace with official copy" instead.', 'fckmaleware' );
 		}
-		if ( ! $policy ) {
+		if ( 'none' === $policy ) {
 			return null;
 		}
 		if ( 'integrity' === $finding['source'] && 'FMW-INT-002' !== $finding['signature_id'] ) {
@@ -336,6 +341,9 @@ final class Remediation {
 		}
 		if ( 'malicious' !== $finding['verdict'] ) {
 			return __( 'Suspicious only: review before quarantining.', 'fckmaleware' );
+		}
+		if ( 'strict' !== $policy ) {
+			return null;
 		}
 		$minimum = (int) Settings::get( 'bulk_min_confidence' );
 		if ( (int) $finding['confidence'] < $minimum ) {

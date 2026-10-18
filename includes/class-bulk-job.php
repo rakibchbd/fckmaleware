@@ -30,6 +30,18 @@ final class BulkJob {
 
 	public const OPTION     = 'fckmw_bulk_job';
 	public const OPS        = array( 'quarantine', 'accept', 'resolve' );
+
+	/**
+	 * One-click "Quarantine all" scopes: scope => [filters, policy].
+	 * Every scope keeps the hard rules (no core or configuration files,
+	 * no database records, no missing files).
+	 */
+	public const SCOPES = array(
+		'eligible'  => array( array( 'status' => 'open' ), 'strict' ),
+		'confirmed' => array( array( 'status' => 'open', 'classification' => 'confirmed' ), 'malicious' ),
+		'malicious' => array( array( 'status' => 'open', 'verdict' => 'malicious' ), 'malicious' ),
+		'all'       => array( array( 'status' => 'open', 'object_type' => 'file' ), 'none' ),
+	);
 	private const LOCK      = 'bulk';
 	private const BATCH     = 25;
 	private const MAX_IDS   = 2000;
@@ -77,7 +89,7 @@ final class BulkJob {
 		if ( ! in_array( $op, self::OPS, true ) || ! in_array( $mode, array( 'ids', 'filters', 'eligible' ), true ) ) {
 			return new \WP_Error( 'fckmw_op', __( 'Choose findings and an action.', 'fckmaleware' ) );
 		}
-		$selection = array( 'op' => $op, 'mode' => $mode, 'ids' => array(), 'filters' => array( 'status' => 'open' ) );
+		$selection = array( 'op' => $op, 'mode' => $mode, 'ids' => array(), 'filters' => array( 'status' => 'open' ), 'policy' => 'ids' === $mode ? 'none' : 'strict', 'scope' => '' );
 		if ( 'ids' === $mode ) {
 			$ids = array_values( array_unique( array_filter( array_map( 'absint', (array) ( $input['ids'] ?? array() ) ) ) ) );
 			if ( ! $ids ) {
@@ -88,6 +100,14 @@ final class BulkJob {
 			$selection['filters'] = self::filters( (array) ( $input['filters'] ?? array() ) );
 		} elseif ( 'quarantine' !== $op ) {
 			return new \WP_Error( 'fckmw_op', __( '"All eligible" applies to quarantine only.', 'fckmaleware' ) );
+		} else {
+			$scope = sanitize_key( (string) ( $input['scope'] ?? 'eligible' ) );
+			if ( ! isset( self::SCOPES[ $scope ] ) ) {
+				return new \WP_Error( 'fckmw_op', __( 'Unknown quarantine scope.', 'fckmaleware' ) );
+			}
+			$selection['filters'] = self::SCOPES[ $scope ][0];
+			$selection['policy']  = self::SCOPES[ $scope ][1];
+			$selection['scope']   = $scope;
 		}
 		return $selection;
 	}
@@ -117,7 +137,7 @@ final class BulkJob {
 		if ( 'quarantine' !== $selection['op'] ) {
 			return null;
 		}
-		return $this->plugin->remediation()->quarantine_eligibility( $row, 'ids' !== $selection['mode'] );
+		return $this->plugin->remediation()->quarantine_eligibility( $row, $selection['policy'] ?? ( 'ids' === $selection['mode'] ? 'none' : 'strict' ) );
 	}
 
 	/**
@@ -194,6 +214,8 @@ final class BulkJob {
 			'mode'      => $selection['mode'],
 			'ids'       => $selection['ids'],
 			'filters'   => $selection['filters'],
+			'policy'    => $selection['policy'] ?? ( 'ids' === $selection['mode'] ? 'none' : 'strict' ),
+			'scope'     => $selection['scope'] ?? '',
 			'status'    => 'running',
 			'cursor'    => 0,
 			'total'     => $total,
@@ -210,7 +232,7 @@ final class BulkJob {
 			'finished'  => 0,
 		);
 		self::save( $job );
-		ActivityLog::log( 'bulk.started', sprintf( /* translators: 1: action, 2: count */ __( '%1$s started for up to %2$d findings.', 'fckmaleware' ), $job['label'], $total ), array( 'job' => $job['id'], 'op' => $job['op'], 'mode' => $job['mode'], 'filters' => $job['filters'], 'total' => $total ), 'notice' );
+		ActivityLog::log( 'bulk.started', sprintf( /* translators: 1: action, 2: count */ __( '%1$s started for up to %2$d findings.', 'fckmaleware' ), $job['label'], $total ), array( 'job' => $job['id'], 'op' => $job['op'], 'mode' => $job['mode'], 'scope' => $job['scope'], 'policy' => $job['policy'], 'filters' => $job['filters'], 'total' => $total ), 'notice' );
 		return $job;
 	}
 
@@ -339,7 +361,7 @@ final class BulkJob {
 			return new \WP_Error( 'fckmw_op', __( 'None of the failures can be retried automatically.', 'fckmaleware' ) );
 		}
 		// The administrator already confirmed these findings; keep the original policy.
-		return $this->start( array( 'op' => $job['op'], 'mode' => 'ids', 'ids' => $ids, 'filters' => array( 'status' => 'open' ) ) );
+		return $this->start( array( 'op' => $job['op'], 'mode' => 'ids', 'ids' => $ids, 'filters' => array( 'status' => 'open' ), 'policy' => 'none', 'scope' => '' ) );
 	}
 
 	/** Fields the browser needs. */

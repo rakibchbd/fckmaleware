@@ -62,6 +62,17 @@ Upload failure behaviour, per case:
 | `quarantine_retention` | 0 | 0–3650 days | Delete quarantined copies after N days; 0 keeps them until deleted |
 | `bulk_min_confidence` | 80 | 50–100 | Minimum confidence for "Quarantine all eligible" and filtered bulk quarantine |
 
+The one-click **Quarantine all** menu (Overview and Threat Findings) has four scopes:
+
+| Scope | Selects | Skips |
+|---|---|---|
+| All eligible (recommended) | Open findings | Everything listed below |
+| All confirmed malware | Malicious, 90%+ from signatures or a server scanner | Hard rules, integrity differences, injected-code findings |
+| All malicious | Every malicious verdict | Hard rules, integrity differences, injected-code findings |
+| Every flagged file | Every open file finding, suspicious ones included | Hard rules only |
+
+The hard rules always apply: no database records, missing files, core files or configuration files. Every scope shows a preview with counts and skip reasons before anything moves, and records one restore point.
+
 Bulk quarantine of filtered or "all eligible" findings skips: non-file findings, missing files, core files (except unknown files in core folders), critical configuration files (`.htaccess`, `.user.ini`, `php.ini`, `web.config`, `wp-config.php` at the root), integrity differences, injected-code findings (`clean`/`repair`), suspicious-only verdicts, confidence below `bulk_min_confidence`, and heuristic matches in active plugins, must-use plugins or the active theme. Explicitly ticked findings only get the hard rules (non-file, missing, core, configuration).
 
 ### Data folder outside the web root
