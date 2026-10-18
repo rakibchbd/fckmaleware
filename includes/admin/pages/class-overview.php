@@ -317,7 +317,7 @@ final class Overview extends Page {
 		$rows        = array(
 			array( 'search', __( 'Scanner', 'fckmaleware' ), $scanner ),
 			array( 'database', __( 'Signatures', 'fckmaleware' ), $signatures ),
-			array( 'shield', __( 'Auto quarantine', 'fckmaleware' ), $settings['auto_quarantine'] ? array( __( 'Enabled', 'fckmaleware' ), 'good' ) : array( __( 'Off (manual review)', 'fckmaleware' ), 'off' ) ),
+			array( 'shield', __( 'Auto removal', 'fckmaleware' ), $settings['auto_remove_verified'] ? array( __( 'Verified malware', 'fckmaleware' ), 'good' ) : array( __( 'Off (manual review)', 'fckmaleware' ), 'warn' ) ),
 			array( 'upload', __( 'Upload protection', 'fckmaleware' ), $settings['realtime_uploads'] ? ( 'monitor' === $settings['upload_block_mode'] ? array( __( 'Monitor only', 'fckmaleware' ), 'warn' ) : array( __( 'Enabled', 'fckmaleware' ), 'good' ) ) : array( __( 'Off', 'fckmaleware' ), 'warn' ) ),
 			array( 'clock', __( 'Scheduled tasks', 'fckmaleware' ), $cron_off ? array( __( 'Needs system cron', 'fckmaleware' ), 'warn' ) : ( 'off' === $settings['schedule'] ? array( __( 'Scans off', 'fckmaleware' ), 'warn' ) : array( __( 'WP-Cron', 'fckmaleware' ), 'good' ) ) ),
 			array( 'cloud', __( 'Server integration', 'fckmaleware' ), array( $integration['label'], $integration['tone'] ) ),

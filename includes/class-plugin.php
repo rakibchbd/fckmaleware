@@ -331,6 +331,10 @@ final class Plugin {
 			);
 			if ( 'ignored' !== $result['outcome'] ) {
 				$count++;
+				$finding = $this->findings()->get( (int) $result['id'] );
+				if ( $finding ) {
+					do_action( 'fckmw_detection', $finding, $result );
+				}
 			}
 		}
 		$this->findings()->resolve_stale( $scan_id, array( 'imunify' ) );
@@ -395,6 +399,9 @@ final class Plugin {
 	}
 
 	public function on_scan_complete( array $state ): void {
+		// Anything verified that a scan saw but could not remove yet (or that
+		// predates the setting) is cleaned up right away.
+		Remediation::schedule_sweep();
 		if ( 'scheduled' === $state['trigger'] ) {
 			/* translators: 1: files, 2: detections */
 			self::record_task( 'core' === $state['mode'] ? 'integrity' : 'scan', 'ok', sprintf( __( 'Finished: %1$d files, %2$d detections.', 'fckmaleware' ), $state['total'], $state['found'] ) );
@@ -523,6 +530,7 @@ final class Plugin {
 		}
 		Paths::ensure_data_dir();
 		self::reschedule();
+		Remediation::schedule_sweep();
 		self::enable_auto_updates();
 
 		if ( '' !== $previous && Schema::VERSION !== $previous ) {
@@ -563,6 +571,7 @@ final class Plugin {
 		wp_clear_scheduled_hook( self::CRON_DB );
 		wp_clear_scheduled_hook( self::CRON_UPLOADS );
 		wp_clear_scheduled_hook( self::CRON_CORE );
+		wp_clear_scheduled_hook( Remediation::CRON_SWEEP );
 		wp_clear_scheduled_hook( Monitor::CRON_QUEUE );
 		wp_clear_scheduled_hook( SignatureUpdater::CRON );
 		wp_clear_scheduled_hook( Notifier::CRON );

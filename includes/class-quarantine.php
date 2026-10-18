@@ -233,11 +233,19 @@ final class Quarantine {
 	 * @return int Number removed.
 	 */
 	public function expire( int $days ): int {
-		if ( $days <= 0 ) {
-			return 0;
-		}
-		$cutoff  = time() - $days * DAY_IN_SECONDS;
 		$removed = 0;
+		// Copies kept after an automatic removal carry their own expiry time.
+		foreach ( $this->all() as $key => $item ) {
+			$until = (int) ( $item['context']['expires'] ?? 0 );
+			if ( $until > 0 && $until < time() ) {
+				$this->purge( (string) $key );
+				$removed++;
+			}
+		}
+		if ( $days <= 0 ) {
+			return $removed;
+		}
+		$cutoff = time() - $days * DAY_IN_SECONDS;
 		foreach ( $this->all() as $key => $item ) {
 			if ( (int) $item['time'] < $cutoff ) {
 				$this->purge( (string) $key );

@@ -52,7 +52,7 @@ Each file passes through the layers in a fixed order. A file that is verified by
 
 1. **Integrity:** core files against `api.wordpress.org` checksums, wordpress.org plugins against `downloads.wordpress.org` checksums, other components against their local baseline, and FCK Malware against its own `checksums.json`.
 2. **Location:** PHP in uploads, and hidden dot-PHP files.
-3. **Signatures:** regex, byte and hash rules. A confidence of 70 or more is *malicious*; lower is *suspicious*.
+3. **Signatures:** regex, byte and hash rules. A rule may carry a `prefilter`: literals of which one must occur (case-insensitive) before the regex runs. The build derives it only when every branch of the pattern reduces to plain literals, so it never hides a match. A confidence of 70 or more is *malicious*; lower is *suspicious*.
 4. **Heuristics:** PHP only, and only when no signature matched. The code is tokenised with `token_get_all`, with per-function taint tracking from request input to sinks. A file is reported when it meets the threshold *and* its strongest indicator is at least 40 *and* it has two or more indicators or one of 80 or more.
 
 Every result is upserted into `fckmw_findings`. The outcome is one of:
@@ -131,6 +131,16 @@ All state changes go through `Admin\Actions`:
   - Scans use the `fckmw_scan` nonce.
   - Bulk jobs use the `fckmw_bulk` nonce.
   - Every step re-checks the capability.
+
+### Automatic removal
+
+`Remediation::maybe_auto_quarantine()` listens to `fckmw_detection`, which fires for scans, event checks, the uploads check and Imunify imports. A finding passing `Remediation::is_verified()` is handed to `auto_remove()`:
+
+- the quarantine runs with the identity re-check;
+- the copy carries an `expires` time, honoured by the daily maintenance;
+- with 0 days the copy is purged at once.
+
+`sweep_verified()` (cron `fckmw_auto_remove_sweep`) handles verified findings that are already open. It is time-boxed and runs under a lock.
 
 ### Bulk jobs
 

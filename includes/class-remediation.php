@@ -29,24 +29,28 @@ final class Remediation {
 	/** @var string|null Restore point collecting the current automatic run. */
 	private $auto_point;
 
+	/** Cron hook that removes verified malware already in the findings list. */
+	public const CRON_SWEEP = 'fckmw_auto_remove_sweep';
+
 	public function __construct( Plugin $plugin ) {
 		$this->plugin = $plugin;
 	}
 
 	public function register(): void {
 		add_action( 'fckmw_detection', array( $this, 'maybe_auto_quarantine' ), 10, 2 );
+		add_action( self::CRON_SWEEP, array( $this, 'sweep_verified' ) );
 	}
 
 	// --- Quarantine -------------------------------------------------------------
 
 	/** @return string|\WP_Error Quarantine key. */
-	public function quarantine( int $finding_id, string $point = '' ) {
+	public function quarantine( int $finding_id, string $point = '', array $extra = array() ) {
 		$finding = $this->confirm( $finding_id );
 		if ( is_wp_error( $finding ) ) {
 			return $finding;
 		}
 		$file = (string) $finding['file'];
-		$key  = $this->plugin->quarantine()->isolate( $file, $this->plugin->findings()->has_open( $file, 'FMW-INT-002' ), array( 'finding' => $finding_id, 'signature' => $finding['signature_id'] ) );
+		$key  = $this->plugin->quarantine()->isolate( $file, $this->plugin->findings()->has_open( $file, 'FMW-INT-002' ), array( 'finding' => $finding_id, 'signature' => $finding['signature_id'] ) + $extra );
 		if ( is_wp_error( $key ) ) {
 			ActivityLog::log( 'quarantine.failed', sprintf( /* translators: 1: file, 2: error */ __( 'Could not quarantine %1$s: %2$s', 'fckmaleware' ), $file, $key->get_error_message() ), array( 'file' => $file, 'finding' => $finding_id ), 'warning' );
 			return $key;
@@ -417,7 +421,14 @@ final class Remediation {
 	 * @param array $result    Findings::upsert() result.
 	 */
 	public function maybe_auto_quarantine( array $detection, array $result ): void {
-		if ( ! Settings::get( 'auto_quarantine' ) || 'ignored' === $result['outcome'] || empty( $detection['file'] ) ) {
+		if ( 'ignored' === $result['outcome'] || empty( $detection['file'] ) ) {
+			return;
+		}
+		if ( Settings::get( 'auto_remove_verified' ) && self::is_verified( $detection + array( 'object_type' => 'file' ) ) ) {
+			$this->auto_remove( (int) $result['id'], $detection );
+			return;
+		}
+		if ( ! Settings::get( 'auto_quarantine' ) ) {
 			return;
 		}
 		// When a server scanner is the primary remediation owner, FCK Malware only
@@ -435,6 +446,120 @@ final class Remediation {
 		$key = $this->quarantine( (int) $result['id'], $this->auto_point );
 		if ( ! is_wp_error( $key ) ) {
 			ActivityLog::log( 'quarantine.auto', sprintf( /* translators: 1: file, 2: detection */ __( 'Automatically quarantined %1$s (%2$s)', 'fckmaleware' ), $file, $detection['signature_name'] ), array( 'file' => $file, 'key' => $key, 'signature' => $detection['signature_id'] ), 'critical' );
+		}
+	}
+
+	// --- Automatic removal of verified malware -----------------------------------
+
+	/**
+	 * Verified malware: a malicious verdict of 90% or more from a signature
+	 * (including exact known-malware hashes) or a server scanner, for a file
+	 * that is malicious as a whole. Never core files, configuration files or
+	 * FCK Malware's own files, and never injected code inside a legitimate file
+	 * (removing that file would remove the legitimate code too).
+	 */
+	public static function is_verified( array $finding ): bool {
+		$file = (string) ( $finding['file'] ?? '' );
+		if ( 'file' !== ( $finding['object_type'] ?? 'file' ) || '' === $file ) {
+			return false;
+		}
+		if ( 'confirmed' !== Findings::classify( $finding ) ) {
+			return false;
+		}
+		if ( ! in_array( (string) ( $finding['remediation'] ?? '' ), array( 'quarantine', '' ), true ) ) {
+			return false;
+		}
+		if ( Paths::is_core( $file ) || Paths::is_critical_config( $file ) ) {
+			return false;
+		}
+		$own = Paths::relative( wp_normalize_path( FCKMW_DIR ) );
+		return null === $own || 0 !== strpos( $file, $own );
+	}
+
+	/**
+	 * Take a verified malicious file off the site now. A verified recovery copy
+	 * is kept for auto_remove_keep_days (0: deleted permanently at once).
+	 *
+	 * @return string|\WP_Error Quarantine key ('' when deleted permanently).
+	 */
+	public function auto_remove( int $finding_id, array $detection = array() ) {
+		// When a server scanner owns remediation, two products must not race.
+		if ( 'server' === Settings::get( 'primary_scanner' ) && Settings::get( 'imunify_enabled' ) && 'imunify' !== ( $detection['source'] ?? '' ) ) {
+			return new \WP_Error( 'fckmw_deferred', __( 'The server scanner handles remediation on this site.', 'fckmaleware' ) );
+		}
+		$finding = $this->plugin->findings()->get( $finding_id );
+		if ( ! $finding || ! self::is_verified( $finding ) ) {
+			return new \WP_Error( 'fckmw_unknown', __( 'Not verified malware.', 'fckmaleware' ) );
+		}
+		if ( null === $this->auto_point ) {
+			$this->auto_point = $this->create_point( __( 'Automatic removal of verified malware', 'fckmaleware' ) );
+		}
+		$days = (int) Settings::get( 'auto_remove_keep_days' );
+		$key  = $this->quarantine( $finding_id, $this->auto_point, array( 'auto' => true, 'expires' => $days > 0 ? time() + $days * DAY_IN_SECONDS : 0 ) );
+		$file = (string) $finding['file'];
+		if ( is_wp_error( $key ) ) {
+			ActivityLog::log( 'quarantine.auto_failed', sprintf( /* translators: 1: file, 2: error */ __( 'Could not remove verified malware %1$s: %2$s', 'fckmaleware' ), $file, $key->get_error_message() ), array( 'file' => $file, 'finding' => $finding_id ), 'critical' );
+			return $key;
+		}
+		if ( $days <= 0 ) {
+			$this->plugin->quarantine()->purge( (string) $key );
+			$this->plugin->findings()->release_quarantine( (string) $key, 'resolved' );
+			ActivityLog::log( 'quarantine.auto', sprintf( /* translators: 1: file, 2: detection */ __( 'Verified malware permanently deleted: %1$s (%2$s)', 'fckmaleware' ), $file, $finding['signature_name'] ), array( 'file' => $file, 'signature' => $finding['signature_id'], 'sha256' => $finding['file_hash'], 'copy_kept' => false ), 'critical' );
+			return '';
+		}
+		ActivityLog::log( 'quarantine.auto', sprintf( /* translators: 1: file, 2: detection, 3: days */ __( 'Verified malware removed from the site: %1$s (%2$s). A recovery copy is kept for %3$d days.', 'fckmaleware' ), $file, $finding['signature_name'], $days ), array( 'file' => $file, 'key' => $key, 'signature' => $finding['signature_id'], 'copy_kept' => true ), 'critical' );
+		return $key;
+	}
+
+	/**
+	 * Remove verified malware that is already listed as open (findings from
+	 * before the setting was on, or from imports). Time-boxed; re-queues itself.
+	 *
+	 * @return int Files removed in this run.
+	 */
+	public function sweep_verified( float $budget = 20.0 ): int {
+		if ( ! Settings::get( 'auto_remove_verified' ) ) {
+			return 0;
+		}
+		$token = Lock::acquire( 'auto-remove', (int) $budget + 60 );
+		if ( null === $token ) {
+			return 0;
+		}
+		$removed  = 0;
+		$deadline = microtime( true ) + $budget;
+		$cursor   = 0;
+		$more     = false;
+		try {
+			$filters = array( 'status' => 'open', 'object_type' => 'file', 'classification' => 'confirmed' );
+			while ( microtime( true ) < $deadline ) {
+				$rows = $this->plugin->findings()->batch_after( $filters, $cursor, 50 );
+				if ( ! $rows ) {
+					break;
+				}
+				foreach ( $rows as $row ) {
+					$cursor = (int) $row['id'];
+					if ( self::is_verified( $row ) && ! is_wp_error( $this->auto_remove( (int) $row['id'], $row ) ) ) {
+						$removed++;
+					}
+					if ( microtime( true ) >= $deadline ) {
+						$more = true;
+						break 2;
+					}
+				}
+			}
+		} finally {
+			Lock::release( 'auto-remove', $token );
+		}
+		if ( $more && ! wp_next_scheduled( self::CRON_SWEEP ) ) {
+			wp_schedule_single_event( time() + 30, self::CRON_SWEEP );
+		}
+		return $removed;
+	}
+
+	/** Queue a sweep to run as soon as WP-Cron fires. */
+	public static function schedule_sweep(): void {
+		if ( Settings::get( 'auto_remove_verified' ) && ! wp_next_scheduled( self::CRON_SWEEP ) ) {
+			wp_schedule_single_event( time(), self::CRON_SWEEP );
 		}
 	}
 

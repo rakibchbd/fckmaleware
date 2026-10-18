@@ -61,6 +61,43 @@ Upload failure behaviour, per case:
 |---|---|---|---|
 | `quarantine_retention` | 0 | 0–3650 days | Delete quarantined copies after N days; 0 keeps them until deleted |
 | `bulk_min_confidence` | 80 | 50–100 | Minimum confidence for "Quarantine all eligible" and filtered bulk quarantine |
+| `auto_remove_verified` | **on** | | Remove verified malware from the site the moment it is detected |
+| `auto_remove_keep_days` | 30 | 0–90 | Days a recovery copy of automatically removed malware is kept before it is permanently deleted; 0 deletes it permanently at once |
+
+### Automatic removal of verified malware
+
+**What counts as verified malware.** All of these must be true:
+
+- the verdict is malicious;
+- the confidence is 90% or more;
+- the match comes from a signature (including exact known-malware hashes) or from Imunify360/ImunifyAV;
+- the rule marks the whole file as malicious (`remediation: quarantine`).
+
+**What is never removed automatically:**
+
+- heuristic-only detections;
+- legitimate files with injected code (`clean` rules, such as an infected `functions.php`), which are listed for cleaning instead;
+- core files and configuration files;
+- FCK Malware's own files.
+
+**When it happens.** The file is removed at the moment of detection, by any of:
+
+- a scan;
+- the uploads check;
+- an install or update check;
+- an Imunify sync.
+
+Verified findings that were already open, or that were found while the setting was off, are removed by a sweep. The sweep runs:
+
+- after every scan;
+- when the setting is switched on;
+- on upgrade.
+
+Malicious uploads are still refused before they are stored.
+
+**What is kept.** Before removal, the file's identity is re-checked against the copy (rename, re-hash, then delete). Unless `auto_remove_keep_days` is 0, a compressed, non-executable recovery copy stays on the Quarantine screen until it expires, and can be restored. Every removal is a critical event in the activity log and triggers an alert.
+
+The older `auto_quarantine` option covers only one extra case: heuristic detections of 95% or more in uploads.
 
 The one-click **Quarantine all** menu (Overview and Threat Findings) has four scopes:
 

@@ -137,7 +137,149 @@ final class Signatures {
 			'revision'        => (int) ( $raw['revision'] ?? 1 ),
 			'false_positives' => array_values( (array) ( $raw['false_positives'] ?? array() ) ),
 			'remediation'     => (string) ( $raw['remediation'] ?? 'review' ),
+			'prefilter'       => array_values( array_slice( array_filter( array_map( 'strval', (array) ( $raw['prefilter'] ?? array() ) ), 'strlen' ), 0, 64 ) ),
 		);
+	}
+
+	/**
+	 * Literals of which at least one must occur (case-insensitive) for the
+	 * pattern to be able to match. Derived only when every top-level branch
+	 * of the pattern is a plain escaped literal or a series of
+	 * "(?=[\s\S]*?literal)" lookaheads (optionally with word-boundary
+	 * lookarounds), so the prefilter is a necessary condition and can never
+	 * hide a match. Returns [] when that cannot be proven.
+	 *
+	 * @return string[] Lower-cased literals.
+	 */
+	public static function derive_prefilter( string $pattern ): array {
+		if ( ! preg_match( '/^~(.*)~([a-zA-Z]*)$/s', $pattern, $m ) || false !== strpos( $m[2], 'x' ) ) {
+			return array();
+		}
+		$body = (string) preg_replace( '/\(\?<!\[[A-Za-z0-9_-]*\]\)|\(\?!\[[A-Za-z0-9_-]*\]\)/', '', $m[1] );
+		$body = (string) preg_replace( '/^\\\\A/', '', $body );
+		$out  = array();
+		foreach ( self::top_branches( self::unwrap_group( $body ) ) as $branch ) {
+			$branch = self::unwrap_group( $branch );
+			$parts  = array();
+			if ( 0 === strpos( $branch, '(?=[\s\S]*?' ) ) {
+				while ( '' !== $branch ) {
+					if ( 0 !== strpos( $branch, '(?=[\s\S]*?' ) ) {
+						return array();
+					}
+					$end = self::group_end( $branch );
+					if ( null === $end ) {
+						return array();
+					}
+					$parts[] = substr( $branch, strlen( '(?=[\s\S]*?' ), $end - strlen( '(?=[\s\S]*?' ) );
+					$branch  = (string) substr( $branch, $end + 1 );
+				}
+			} else {
+				$parts[] = $branch;
+			}
+			$literal = null;
+			foreach ( $parts as $part ) {
+				$plain = self::plain_literal( $part );
+				if ( null === $plain || strlen( $plain ) < 4 ) {
+					continue;
+				}
+				// The longest literal of the branch is the most selective.
+				if ( null === $literal || strlen( $plain ) > strlen( $literal ) ) {
+					$literal = $plain;
+				}
+			}
+			if ( null === $literal ) {
+				return array();
+			}
+			$out[] = strtolower( $literal );
+		}
+		return array_values( array_unique( $out ) );
+	}
+
+	/** Unescaped text of a regex fragment, or null if it holds any regex syntax. */
+	private static function plain_literal( string $fragment ): ?string {
+		$out = '';
+		for ( $i = 0, $n = strlen( $fragment ); $i < $n; $i++ ) {
+			$c = $fragment[ $i ];
+			if ( '\\' === $c ) {
+				$next = $fragment[ $i + 1 ] ?? '';
+				if ( '' === $next || ctype_alnum( $next ) ) {
+					return null; // \s, \d, \x41, \b, ... are not literals.
+				}
+				$out .= $next;
+				$i++;
+				continue;
+			}
+			if ( false !== strpos( '.^$|?*+()[]{}', $c ) ) {
+				return null;
+			}
+			$out .= $c;
+		}
+		return $out;
+	}
+
+	/** Index of the parenthesis that closes the group opening at 0, or null. */
+	private static function group_end( string $s ): ?int {
+		$depth = 0;
+		$class = false;
+		for ( $i = 0, $n = strlen( $s ); $i < $n; $i++ ) {
+			$c = $s[ $i ];
+			if ( '\\' === $c ) {
+				$i++;
+				continue;
+			}
+			if ( $class ) {
+				$class = ']' !== $c;
+				continue;
+			}
+			if ( '[' === $c ) {
+				$class = true;
+			} elseif ( '(' === $c ) {
+				$depth++;
+			} elseif ( ')' === $c && 0 === --$depth ) {
+				return $i;
+			}
+		}
+		return null;
+	}
+
+	/** Strip "(?:" ... ")" while it wraps the whole fragment. */
+	private static function unwrap_group( string $s ): string {
+		while ( 0 === strpos( $s, '(?:' ) && self::group_end( $s ) === strlen( $s ) - 1 ) {
+			$s = substr( $s, 3, -1 );
+		}
+		return $s;
+	}
+
+	/** @return string[] Top-level "|" branches. */
+	private static function top_branches( string $s ): array {
+		$parts = array();
+		$cur   = '';
+		$depth = 0;
+		$class = false;
+		for ( $i = 0, $n = strlen( $s ); $i < $n; $i++ ) {
+			$c = $s[ $i ];
+			if ( '\\' === $c ) {
+				$cur .= $c . ( $s[ $i + 1 ] ?? '' );
+				$i++;
+				continue;
+			}
+			if ( $class ) {
+				$class = ']' !== $c;
+			} elseif ( '[' === $c ) {
+				$class = true;
+			} elseif ( '(' === $c ) {
+				$depth++;
+			} elseif ( ')' === $c ) {
+				$depth--;
+			} elseif ( '|' === $c && 0 === $depth ) {
+				$parts[] = $cur;
+				$cur     = '';
+				continue;
+			}
+			$cur .= $c;
+		}
+		$parts[] = $cur;
+		return $parts;
 	}
 
 	/** @return string|null Reason the signature is unusable, or null when it is valid. */
@@ -342,9 +484,24 @@ final class Signatures {
 	 */
 	public function match( string $content, string $type ): array {
 		$matches = array();
+		$lower   = null;
 		foreach ( $this->signatures as $sig ) {
 			if ( ! in_array( $type, $sig['targets'], true ) && ! in_array( 'any', $sig['targets'], true ) ) {
 				continue;
+			}
+			if ( $sig['prefilter'] ) {
+				// Cheap necessary condition before the (much slower) regex.
+				$lower = $lower ?? strtolower( $content );
+				$found = false;
+				foreach ( $sig['prefilter'] as $literal ) {
+					if ( false !== strpos( $lower, $literal ) ) {
+						$found = true;
+						break;
+					}
+				}
+				if ( ! $found ) {
+					continue;
+				}
 			}
 
 			if ( 'bytes' === $sig['technique'] ) {

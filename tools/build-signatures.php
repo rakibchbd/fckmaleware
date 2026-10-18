@@ -3,7 +3,7 @@
  * Compile signatures/src into signatures/signatures.json.
  *
  * Sources:
- *   signatures/src/fckmw-core.php       Project-authored signatures (PHP array).
+ *   signatures/src/fckmw-*.php          Project-authored signatures (PHP arrays).
  *   signatures/src/approved/*.json      Signatures approved through the threat-intel
  *                                       pipeline (tools/intel/approve.php).
  *
@@ -24,6 +24,11 @@ $target = $root . '/signatures/signatures.json';
 $check  = in_array( '--check', $argv, true );
 
 $signatures = require $root . '/signatures/src/fckmw-core.php';
+foreach ( glob( $root . '/signatures/src/fckmw-*.php' ) ?: array() as $file ) {
+	if ( 'fckmw-core.php' !== basename( $file ) ) {
+		$signatures = array_merge( $signatures, require $file );
+	}
+}
 foreach ( glob( $root . '/signatures/src/approved/*.json' ) ?: array() as $file ) {
 	$batch = json_decode( (string) file_get_contents( $file ), true );
 	if ( ! is_array( $batch ) || ! isset( $batch['signatures'] ) ) {
@@ -42,6 +47,13 @@ usort(
 	}
 );
 $signatures = array_map( array( Signatures::class, 'normalize' ), $signatures );
+// Literal prefilters make pattern-heavy rules cheap on files that cannot match.
+foreach ( $signatures as &$signature ) {
+	if ( 'regex' === $signature['technique'] && ! $signature['prefilter'] ) {
+		$signature['prefilter'] = Signatures::derive_prefilter( $signature['pattern'] );
+	}
+}
+unset( $signature );
 
 $previous = is_readable( $target ) ? json_decode( (string) file_get_contents( $target ), true ) : null;
 $changed  = ! is_array( $previous ) || ( $previous['signatures'] ?? null ) !== $signatures;

@@ -67,7 +67,9 @@ final class SettingsPage extends Page {
 		Ui::card_end();
 
 		Ui::card_start( $groups['quarantine'], '', '', 'quarantine' );
-		Ui::toggle( 'auto_quarantine', $s['auto_quarantine'], __( 'Automatic quarantine of high-confidence threats', 'fckmaleware' ), __( 'Off by default. Narrowly limited; never core, configuration, plugin or theme files.', 'fckmaleware' ) );
+		Ui::toggle( 'auto_remove_verified', $s['auto_remove_verified'], __( 'Remove verified malware automatically, immediately', 'fckmaleware' ), __( 'Signature, exact-hash and server-scanner matches of 90% or more for files that are malicious as a whole. Never core or configuration files.', 'fckmaleware' ) );
+		Ui::input( 'auto_remove_keep_days', (string) $s['auto_remove_keep_days'], __( 'Keep a recovery copy for (days)', 'fckmaleware' ), 'number', __( '0 deletes removed malware permanently at once.', 'fckmaleware' ), array( 'min' => 0, 'max' => 90, 'class' => 'small-text' ) );
+		Ui::toggle( 'auto_quarantine', $s['auto_quarantine'], __( 'Also quarantine very-high-confidence heuristic detections in uploads', 'fckmaleware' ), __( 'Off by default.', 'fckmaleware' ) );
 		Ui::input( 'bulk_min_confidence', (string) $s['bulk_min_confidence'], __( 'Bulk quarantine minimum confidence (%)', 'fckmaleware' ), 'number', '', array( 'min' => 50, 'max' => 100, 'class' => 'small-text' ) );
 		Ui::input( 'quarantine_retention', (string) $s['quarantine_retention'], __( 'Delete quarantined copies after (days)', 'fckmaleware' ), 'number', __( '0 keeps them until you delete them. Expired copies are removed by the daily cleanup and logged.', 'fckmaleware' ), array( 'min' => 0, 'max' => 3650, 'class' => 'small-text' ) );
 		Ui::card_end();

@@ -49,6 +49,8 @@ $up_dir   = trailingslashit( $uploads['basedir'] ) . 'fckmw-ft-' . $suffix;
 $settings = Store::get( Settings::OPTION, array() );
 wp_mkdir_p( $dir );
 wp_mkdir_p( $up_dir );
+// Most scenarios review findings by hand; automatic removal is tested on its own below.
+Settings::update( array( 'auto_remove_verified' => '' ), array( 'auto_remove_verified' ) );
 
 // Inert samples: real malicious patterns, never executed.
 $shell   = "<?php\nif (isset(\$_POST['cmd'])) { echo shell_exec(\$_POST['cmd']); }\n";
@@ -64,6 +66,45 @@ foreach ( $samples as $name => $code ) {
 }
 
 try {
+	// --- Automatic removal of verified malware ----------------------------------
+	$auto_dir = "{$dir}/auto";
+	wp_mkdir_p( $auto_dir );
+	file_put_contents( "{$auto_dir}/web.php", $shell ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+	file_put_contents( "{$auto_dir}/odd.php", "<?php\n\$x = 'ZWNobyAnaGknOw=='; \$y = gzinflate(base64_decode(\$x));\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+	Settings::update( array( 'auto_remove_verified' => '1', 'auto_remove_keep_days' => '30' ), array( 'auto_remove_verified' ) );
+	$plugin->scanner()->run( 'custom', 'cli', array( 'scope' => "{$dir_rel}/auto" ) );
+	$check( ! file_exists( "{$auto_dir}/web.php" ), 'verified malware is removed during the scan that finds it' );
+	$check( file_exists( "{$auto_dir}/odd.php" ), 'suspicious-only files are never removed automatically' );
+	$kept = array_filter( $plugin->quarantine()->all(), static function ( $i ) use ( $dir_rel ) { return "{$dir_rel}/auto/web.php" === $i['file'] && ! empty( $i['context']['auto'] ); } );
+	$item = reset( $kept );
+	$check( $item && abs( (int) $item['context']['expires'] - ( time() + 30 * DAY_IN_SECONDS ) ) < 120, 'a recovery copy is kept with a 30-day expiry' );
+	$check( $item && $shell === $plugin->quarantine()->content( (string) key( $kept ) ), 'the recovery copy is byte-identical' );
+	Settings::update( array( 'auto_remove_keep_days' => '0' ) );
+	file_put_contents( "{$auto_dir}/web2.php", $shell . "// 2\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+	$count_before = count( $plugin->quarantine()->all() );
+	$plugin->scanner()->run( 'custom', 'cli', array( 'scope' => "{$dir_rel}/auto" ) );
+	$check( ! file_exists( "{$auto_dir}/web2.php" ) && count( $plugin->quarantine()->all() ) === $count_before, '0 days deletes verified malware permanently with no copy' );
+	Settings::update( array( 'auto_remove_verified' => '', 'auto_remove_keep_days' => '30' ), array( 'auto_remove_verified' ) );
+	file_put_contents( "{$auto_dir}/web3.php", $shell . "// 3\n" ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+	$plugin->scanner()->run( 'custom', 'cli', array( 'scope' => "{$dir_rel}/auto" ) );
+	$check( file_exists( "{$auto_dir}/web3.php" ), 'nothing is removed while the setting is off' );
+	Settings::update( array( 'auto_remove_verified' => '1' ), array( 'auto_remove_verified' ) );
+	$check( $plugin->remediation()->sweep_verified() >= 1 && ! file_exists( "{$auto_dir}/web3.php" ), 'the sweep removes verified malware found earlier' );
+	$check( ! Fckmaleware\Remediation::is_verified( array( 'object_type' => 'file', 'file' => 'wp-includes/x.php', 'verdict' => 'malicious', 'confidence' => 99, 'source' => 'signature', 'remediation' => 'quarantine' ) ), 'core files are never removed automatically' );
+	$check( ! Fckmaleware\Remediation::is_verified( array( 'object_type' => 'file', 'file' => 'wp-content/themes/t/functions.php', 'verdict' => 'malicious', 'confidence' => 95, 'source' => 'signature', 'remediation' => 'clean' ) ), 'legitimate files with injected code are never removed automatically' );
+	$check( ! Fckmaleware\Remediation::is_verified( array( 'object_type' => 'file', 'file' => 'wp-content/x.php', 'verdict' => 'malicious', 'confidence' => 98, 'source' => 'heuristic', 'remediation' => 'quarantine' ) ), 'heuristic detections are never removed automatically' );
+	$quarantine_items = $plugin->quarantine()->all();
+	foreach ( $quarantine_items as $qkey => $qitem ) {
+		if ( 0 === strpos( (string) $qitem['file'], "{$dir_rel}/auto/" ) ) {
+			$plugin->quarantine()->purge( (string) $qkey );
+		}
+	}
+	Settings::update( array( 'auto_remove_verified' => '' ), array( 'auto_remove_verified' ) );
+	foreach ( (array) glob( "{$auto_dir}/*" ) as $file ) {
+		wp_delete_file( $file );
+	}
+	@rmdir( $auto_dir ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions
+
 	// --- Navigation -------------------------------------------------------------
 	$sections = Admin::sections();
 	$check( 5 === count( $sections ), 'five top-level sections' );

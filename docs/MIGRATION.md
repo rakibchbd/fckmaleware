@@ -1,3 +1,11 @@
+# Upgrading from 1.1 to 1.2
+
+- **Verified malware is now removed automatically, on by default.** On the first request after the upgrade, a sweep removes every open verified finding: malicious, 90%+, from a signature, hash or Imunify, whole-file only. Heuristic, suspicious and injected-code findings stay for review. Recovery copies are kept for 30 days.
+
+  To review first instead, turn it off before upgrading, or right after, under **Protection → Real-Time Protection → Quarantine**. Every removal can be restored from the Quarantine screen until its copy expires.
+- **The bundled signature database grows.** See the changelog for the new rules. They reach sites with the plugin update, not through the signed feed, until a maintainer signs a new feed.
+- No database changes.
+
 # Upgrading from 1.0.x to 1.1
 
 The upgrade is automatic, runs once on the first request, and keeps all data.

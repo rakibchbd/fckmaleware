@@ -47,6 +47,9 @@ $samples = array(
 foreach ( $samples as $name => $code ) {
 	file_put_contents( "{$dir}/{$name}", $code ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 }
+// These scenarios review findings by hand, so automatic removal is paused.
+$fckmw_saved_settings = Store::get( Settings::OPTION, array() );
+Settings::update( array( 'auto_remove_verified' => '' ), array( 'auto_remove_verified' ) );
 
 try {
 	// --- Scan -----------------------------------------------------------------
@@ -220,6 +223,7 @@ try {
 	remove_filter( 'pre_http_request', $filter, 10 );
 	$updater->flush();
 } finally {
+	Store::set( Settings::OPTION, $fckmw_saved_settings );
 	foreach ( (array) glob( "{$dir}/*" ) as $file ) {
 		wp_delete_file( $file );
 	}

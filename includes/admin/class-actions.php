@@ -103,6 +103,9 @@ final class Actions {
 		if ( array_intersect( $changed, self::SCHEDULE_KEYS ) ) {
 			Plugin::reschedule();
 		}
+		if ( in_array( 'auto_remove_verified', $changed, true ) && $after['auto_remove_verified'] ) {
+			\Fckmaleware\Remediation::schedule_sweep();
+		}
 		// Only the names of changed settings are logged, never their values (API keys).
 		ActivityLog::log( 'settings.saved', __( 'Settings changed.', 'fckmaleware' ), array( 'changed' => $changed ), 'notice' );
 		return __( 'Settings saved.', 'fckmaleware' );

@@ -9,6 +9,7 @@ use Fckmaleware\Findings;
 use Fckmaleware\Monitor;
 use Fckmaleware\Secrets;
 use Fckmaleware\Settings;
+use Fckmaleware\Signatures;
 
 // Dangerous upload names.
 foreach ( array( 'shell.php', 'SHELL.PHP', 'photo.php.jpg', 'a.phtml', 'x.phar', 'run.cgi', 'x.pl', 'x.py', 'page.asp', 'page.aspx', 'x.jsp', 'install.sh', 'x.php7', 'x.shtml', '.htaccess', '.user.ini', 'web.config' ) as $name ) {
@@ -61,3 +62,16 @@ if ( function_exists( 'sodium_crypto_secretbox' ) ) {
 	check( '' === Secrets::decrypt( 'fckmw-enc:v1:' . base64_encode( str_repeat( 'x', 40 ) ) ), 'tampered ciphertext reads as empty' );
 	check( '' === Secrets::encrypt( '' ), 'empty secret stays empty' );
 }
+
+// Prefilter derivation: only provably necessary literals, otherwise none.
+check( array( 'evil_marker' ) === Signatures::derive_prefilter( '~(?:evil_marker)~i' ), 'prefilter for a plain literal' );
+check( array( 'alpha-one', 'beta two' ) === Signatures::derive_prefilter( '~(?:alpha\-one|beta two)~' ), 'prefilter for one-of literals' );
+check( array( 'longer literal' ) === Signatures::derive_prefilter( '~\A(?=[\s\S]*?abcd)(?=[\s\S]*?longer literal)~' ), 'prefilter keeps the longest literal of an all-of branch' );
+check( array( '$x = 1' ) === Signatures::derive_prefilter( '~(?:(?<![A-Za-z0-9_])\$x \= 1(?![A-Za-z0-9_]))~' ), 'word-boundary lookarounds are allowed' );
+check( array() === Signatures::derive_prefilter( '~eval\s*\(~i' ), 'no prefilter when a branch uses \s' );
+check( array() === Signatures::derive_prefilter( '~(?:abcd|ef[gh]ij)~' ), 'no prefilter when any branch has a character class' );
+check( array() === Signatures::derive_prefilter( '~(?:abcd|x)~' ), 'no prefilter when a branch literal is too short' );
+check( array() === Signatures::derive_prefilter( '~abcd~x' ), 'no prefilter with the x modifier' );
+$db = new Signatures( array( 'version' => '1', 'signatures' => array( array( 'id' => 'T-PF', 'pattern' => '~needle\s*here~i', 'targets' => array( 'php' ), 'prefilter' => array( 'needle' ) ) ) ) );
+check( 1 === count( $db->match( 'xx NEEDLE   here', 'php' ) ), 'prefilter is case-insensitive and lets matches through' );
+check( 0 === count( $db->match( 'nothing to see', 'php' ) ), 'prefilter skips files without the literal' );

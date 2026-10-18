@@ -1,0 +1,59 @@
+{
+    "source": "urlhaus",
+    "signatures": [
+        {
+            "id": "FMW-UH-WORDPRESS-20261018-1",
+            "name": "Script host from the Wordpress campaign",
+            "family": "JS.Injection.Wordpress",
+            "category": "js-injection",
+            "technique": "regex",
+            "severity": "high",
+            "confidence": 80,
+            "targets": [
+                "js",
+                "html",
+                "php",
+                "db"
+            ],
+            "pattern": "~(?<![a-z0-9.-])(?:brows\\-check\\.codes)(?![a-z0-9-])~i",
+            "bytes": "",
+            "nocase": false,
+            "sha256": [],
+            "description": "References a host reported by URLhaus for the wordpress web-injection campaign (1 hosts).",
+            "source": "URLhaus by abuse.ch (https://urlhaus.abuse.ch/)",
+            "license": "CC0-1.0",
+            "created": "2026-10-18",
+            "updated": "2026-10-18",
+            "revision": 1,
+            "false_positives": [],
+            "remediation": "clean"
+        },
+        {
+            "id": "FMW-UH-CLEARFAKE-20261018-1",
+            "name": "Script host from the Clearfake campaign",
+            "family": "JS.Injection.Clearfake",
+            "category": "js-injection",
+            "technique": "regex",
+            "severity": "high",
+            "confidence": 80,
+            "targets": [
+                "js",
+                "html",
+                "php",
+                "db"
+            ],
+            "pattern": "~(?<![a-z0-9.-])(?:allowcsxan2\\.site|c23c1b\\-fa77\\-48e0\\-8272\\-692b579a574c\\.gorsefield\\.cc|chekcms432\\.cc|journeylake11\\.com|spitandmalachite\\.com)(?![a-z0-9-])~i",
+            "bytes": "",
+            "nocase": false,
+            "sha256": [],
+            "description": "References a host reported by URLhaus for the clearfake web-injection campaign (5 hosts).",
+            "source": "URLhaus by abuse.ch (https://urlhaus.abuse.ch/)",
+            "license": "CC0-1.0",
+            "created": "2026-10-18",
+            "updated": "2026-10-18",
+            "revision": 1,
+            "false_positives": [],
+            "remediation": "clean"
+        }
+    ]
+}

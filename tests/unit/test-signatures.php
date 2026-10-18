@@ -68,6 +68,145 @@ $positive = array(
 	'FMW-BYTES-001' => array( 'image', "GIF89a<?php echo 1; ?>" ),
 );
 
+// Rules added in 1.2 use their fixture file as the positive sample.
+$from_fixtures = array(
+	'FMW-WP-001'  => 'wp-vcd.php',
+	'FMW-WP-002'  => 'admin-create.php',
+	'FMW-WP-003'  => 'login-stealer.php',
+	'FMW-WP-004'  => 'telegram-exfil.php',
+	'FMW-WP-005'  => 'option-eval.php',
+	'FMW-WP-006'  => 'auth-bypass.php',
+	'FMW-WP-007'  => 'head-injection.php',
+	'FMW-WP-008'  => 'update-block.php',
+	'FMW-PHP-029' => 'shell-title.php',
+	'FMW-PHP-030' => 'hex-name.php',
+	'FMW-PHP-031' => 'octal-name.php',
+	'FMW-PHP-032' => 'rot13-name.php',
+	'FMW-PHP-033' => 'probe.php',
+	'FMW-PHP-034' => 'extract-call.php',
+	'FMW-PHP-035' => 'remote-include.php',
+	'FMW-PHP-036' => 'callback-shutdown.php',
+	'FMW-PHP-037' => 'silent-exec.php',
+	'FMW-PHP-038' => 'short-var.php',
+	'FMW-PHP-039' => 'mailer.php',
+	'FMW-PHP-040' => 'serverinfo-shell.php',
+	'FMW-PHP-041' => 'defacement.html',
+	'FMW-PHP-042' => 'data-include.php',
+	'FMW-JS-008'  => 'clearfake.js',
+	'FMW-JS-009'  => 'fake-update.js',
+	'FMW-JS-010'  => 'skimmer.js',
+	'FMW-JS-011'  => 'miner.js',
+	'FMW-JS-012'  => 'balada.js',
+	'FMW-JS-013'  => 'mobile-redirect.js',
+	'FMW-JS-014'  => 'packed-post.html',
+	'FMW-HTA-004' => 'lockout.htaccess',
+	'FMW-HTA-005' => 'spam-rewrite.htaccess',
+	'FMW-CFG-003' => 'url-include.ini',
+);
+foreach ( $from_fixtures as $id => $fixture ) {
+	$path            = FCKMW_ROOT . '/tests/fixtures/malware/' . $fixture . '.fixture';
+	$positive[ $id ] = array( fixture_type( $path ), (string) file_get_contents( $path ) );
+}
+
+/**
+ * Rules converted by the threat-intel pipeline (signature-base YARA rules,
+ * URLhaus hosts) carry no hand-written sample. One is synthesised from the
+ * pattern itself: the literals of its first branch (one-of rules) or of every
+ * lookahead in the first branch (all-of rules). Matching that sample proves
+ * the rule matches the strings it was converted from.
+ */
+function fmw_split_top( string $body ): array {
+	$parts = array();
+	$depth = 0;
+	$class = false;
+	$cur   = '';
+	for ( $i = 0, $n = strlen( $body ); $i < $n; $i++ ) {
+		$c = $body[ $i ];
+		if ( '\\' === $c ) {
+			$cur .= $c . ( $body[ $i + 1 ] ?? '' );
+			$i++;
+			continue;
+		}
+		if ( $class ) {
+			$class = ']' !== $c;
+		} elseif ( '[' === $c ) {
+			$class = true;
+		} elseif ( '(' === $c ) {
+			$depth++;
+		} elseif ( ')' === $c ) {
+			$depth--;
+		} elseif ( '|' === $c && 0 === $depth ) {
+			$parts[] = $cur;
+			$cur     = '';
+			continue;
+		}
+		$cur .= $c;
+	}
+	$parts[] = $cur;
+	return $parts;
+}
+function fmw_unwrap( string $body ): string {
+	while ( 0 === strpos( $body, '(?:' ) && ')' === substr( $body, -1 ) && 1 === count( fmw_split_top( substr( $body, 3, -1 ) ) ) + ( count( fmw_split_top( $body ) ) - 1 ) ) {
+		$inner = substr( $body, 3, -1 );
+		// Only unwrap when the outer group spans the whole body.
+		$depth = 0;
+		$whole = true;
+		for ( $i = 0, $n = strlen( $body ); $i < $n; $i++ ) {
+			if ( '\\' === $body[ $i ] ) {
+				$i++;
+				continue;
+			}
+			$depth += '(' === $body[ $i ] ? 1 : ( ')' === $body[ $i ] ? -1 : 0 );
+			if ( 0 === $depth && $i < $n - 1 ) {
+				$whole = false;
+				break;
+			}
+		}
+		if ( ! $whole ) {
+			break;
+		}
+		$body = $inner;
+	}
+	return $body;
+}
+function fmw_literal( string $regex ): string {
+	return (string) preg_replace( '/\\\\(.)/s', '$1', $regex );
+}
+function fmw_synthesize( string $pattern ): string {
+	$body = substr( $pattern, 1, strrpos( $pattern, '~' ) - 1 );
+	$body = (string) preg_replace( '/\(\?<!\[[^\]]*\]\)|\(\?!\[[^\]]*\]\)/', '', $body );
+	$body = (string) preg_replace( '/^\\\\A/', '', $body );
+	$body = fmw_unwrap( $body );
+	$branch = fmw_unwrap( fmw_split_top( $body )[0] );
+	if ( 0 !== strpos( $branch, '(?=' ) ) {
+		return fmw_literal( $branch );
+	}
+	$literals = array();
+	while ( 0 === strpos( $branch, '(?=[\s\S]*?' ) ) {
+		$depth = 0;
+		for ( $i = 0, $n = strlen( $branch ); $i < $n; $i++ ) {
+			if ( '\\' === $branch[ $i ] ) {
+				$i++;
+				continue;
+			}
+			$depth += '(' === $branch[ $i ] ? 1 : ( ')' === $branch[ $i ] ? -1 : 0 );
+			if ( 0 === $depth ) {
+				break;
+			}
+		}
+		$literals[] = fmw_literal( substr( $branch, strlen( '(?=[\s\S]*?' ), $i - strlen( '(?=[\s\S]*?' ) ) );
+		$branch     = (string) substr( $branch, $i + 1 );
+	}
+	return implode( "\n", $literals );
+}
+foreach ( $raw['signatures'] as $sig ) {
+	if ( ! isset( $positive[ $sig['id'] ] ) && 'regex' === $sig['technique'] && 0 === strpos( $sig['id'], 'FMW-SB-' ) ) {
+		$positive[ $sig['id'] ] = array( $sig['targets'][0], fmw_synthesize( $sig['pattern'] ) );
+	} elseif ( ! isset( $positive[ $sig['id'] ] ) && 'regex' === $sig['technique'] && 0 === strpos( $sig['id'], 'FMW-UH-' ) && preg_match( '/\(\?:([a-z0-9\\\\.-]+)/i', $sig['pattern'], $host ) ) {
+		$positive[ $sig['id'] ] = array( 'html', '<script src="https://' . fmw_literal( $host[1] ) . '/j.js"></script>' );
+	}
+}
+
 foreach ( $raw['signatures'] as $sig ) {
 	check( isset( $positive[ $sig['id'] ] ) || 'hash' === $sig['technique'], "{$sig['id']} has a positive test sample" );
 }

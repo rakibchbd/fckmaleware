@@ -82,7 +82,10 @@ return array(
 			'severity'    => 'critical',
 			'confidence'  => 90,
 			'targets'     => array( 'php' ),
-			'pattern'     => '~\$_(?:GET|POST|REQUEST|COOKIE)\s*\[[^\]]{1,40}\]\s*\(~i',
+			// The call must carry an argument or close at once: prose such as
+			// "$_GET['folder_id'] (exact match)" in comments is not a call.
+			'pattern'     => '~\$_(?:GET|POST|REQUEST|COOKIE)\s*\[[^\]]{1,40}\]\s*\(\s*(?:\$|["\'@)]|\d)~i',
+			'revision'    => 2,
 			'description' => 'Calls a function whose name comes from the request, e.g. $_GET["f"]($_GET["c"]).',
 			'remediation' => 'quarantine',
 		)

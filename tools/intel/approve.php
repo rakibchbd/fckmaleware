@@ -21,8 +21,19 @@ require __DIR__ . '/lib.php';
 
 use Fckmaleware\Signatures;
 
-$file    = $argv[1] ?? '';
-$options = getopt( '', array( 'ids:', 'all', 'reviewer:' ) );
+// Parsed by hand: getopt() stops at the first non-option argument, which
+// made "approve.php <file> --all ..." (the documented order) ignore options.
+$file    = '';
+$options = array();
+foreach ( array_slice( $argv, 1 ) as $arg ) {
+	if ( preg_match( '/^--(ids|reviewer)=(.*)$/s', $arg, $m ) ) {
+		$options[ $m[1] ] = $m[2];
+	} elseif ( '--all' === $arg ) {
+		$options['all'] = true;
+	} elseif ( '' === $file ) {
+		$file = $arg;
+	}
+}
 if ( ! is_readable( $file ) || ( empty( $options['ids'] ) && ! isset( $options['all'] ) ) || empty( $options['reviewer'] ) ) {
 	fwrite( STDERR, "Usage: php tools/intel/approve.php <candidate file> (--ids=A,B | --all) --reviewer=<name>\n" );
 	exit( 2 );

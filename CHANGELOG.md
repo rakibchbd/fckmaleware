@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.2.0 (2026-10-18)
+
+### Automatic removal of verified malware (on by default)
+- Verified malware is removed from the site the moment a scan, the uploads check, an install or update check, or an Imunify sync detects it. Verified means:
+  - a malicious verdict of 90% or more;
+  - from a signature, an exact known-malware hash or Imunify360/ImunifyAV;
+  - a rule that marks the whole file as malicious.
+- A sweep removes verified findings that were already open. It runs on upgrade, when the setting is switched on, and after every scan.
+- A recovery copy is kept for `auto_remove_keep_days` (default 30, then permanently deleted); 0 deletes immediately with no copy.
+- Never removed automatically: heuristic-only detections, suspicious verdicts, legitimate files with injected code, core files, configuration files, FCK Malware's own files.
+- Each removal re-verifies the file's identity first, is a critical activity-log event and triggers an alert.
+- When a server scanner owns remediation (`primary_scanner = server`), only its own detections are acted on.
+
+### Signatures: 45 → 329
+- 32 new project rules for WordPress-specific families:
+  - persistence: WP-VCD, hard-coded admin creation, login credential stealers, auth-cookie bypass, code stored in options, Telegram exfiltration, update blocking;
+  - shell and obfuscation markers: web-shell titles, hex/octal/ROT13 function names, the `pi()*42` probe, `extract()` call, remote and `data:` includes, callback backdoors, silent droppers, mass mailers, defacements;
+  - front-end attacks: ClearFake/EtherHiding, fake browser updates, card skimmers, miners, Balada-style loaders, conditional redirects, packed scripts in posts;
+  - server configuration: lockout `.htaccess` and spam rewrites, `allow_url_include`.
+
+  Each has an inert fixture.
+- 250 PHP web-shell rules converted from Neo23x0/signature-base (DRL 1.1) and 2 URLhaus campaign host rules.
+- Every rule matched nothing in a new 78,158-file clean corpus: core, 68 popular plugins including file managers, security and backup plugins, and 10 themes.
+- Every rule has a positive test sample. Samples for converted rules are synthesised from the rule itself.
+- Literal **prefilters**, derived at build time only where a pattern provably reduces to literals (251 rules). The 329-rule database scans the corpus in 106 s instead of 476 s without them (the 45-rule database took 62 s), and no rule hits PCRE backtracking limits any more.
+- Fixed a 1.0 false positive: `FMW-PHP-004` (90%, whole-file) matched prose in doc comments, such as `$_GET['folder_id'] (exact folder match)` in ShortPixel. With automatic removal it would have deleted legitimate plugin files. The call must now carry an argument.
+- `tools/intel/approve.php` now accepts its options after the file name, as documented (`getopt` ignored them before).
+- The new rules ship in the bundled database (v2026.10.18.3). The signed feed is unchanged until a maintainer signs a new manifest with the offline key.
+
 ## 1.1.0 (2026-10-17)
 
 A redesign of the whole admin plus safety, protection and integration work. Data from 1.0.x is kept; see `docs/MIGRATION.md` and `docs/AUDIT-1.1.md`.

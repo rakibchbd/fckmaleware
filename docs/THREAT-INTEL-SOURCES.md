@@ -82,3 +82,14 @@ The bundle is format `fckmw-feedback-1`. It holds per-rule status counts and the
 - `intel/candidates/2026-10-17-urlhaus.json`: 2 pending.
 - `intel/candidates/2026-10-17-signature-base.json`: 250 pending and 2 rejected (duplicate IDs). All 250 matched nothing in the 40,761-file clean corpus. **None have been approved.** Each one still needs human review before it can ship.
 - MalwareBazaar has not been collected; it needs an auth key.
+
+## Approval record
+
+| Date | Batch | Approved | Corpus | Reviewer |
+|---|---|---|---|---|
+| 2026-10-18 | `intel/candidates/2026-10-18-signature-base.json` | 250 of 252 (2 rejected as duplicates) | 78,158 files: WordPress 7.1.3 core, 68 plugins, 10 themes; 0 hits for every approved rule | Repository owner (requested via Claude Code session) |
+| 2026-10-18 | `intel/candidates/2026-10-18-urlhaus.json` | 2 of 2 (ClearFake and WordPress-tagged campaign hosts) | Same; 0 hits | Same |
+
+The signature-base rules keep the confidence the converter gives them (70: malicious, but below the 90% needed for automatic removal). A detection from them is reported for review and never removed automatically.
+
+MalwareBazaar hashes were not collected: the source needs an `ABUSECH_AUTH_KEY`.

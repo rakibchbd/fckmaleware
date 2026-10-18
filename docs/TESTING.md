@@ -13,6 +13,18 @@
 
 **Run the integration and end-to-end suites only against a throwaway site.** They write sample files, quarantine and restore them, and change settings.
 
+## Results for 1.2.0 (2026-10-18)
+
+Same environment as 1.1.0.
+
+| Suite | Result |
+|---|---|
+| Unit | **5,845 checks passed.** Every one of the 329 signatures matches a positive sample, through the full matcher with prefilters. Includes the prefilter-derivation rules and the 32 new malware fixtures, all detected; no clean fixture flagged. |
+| Clean corpus, full engine | WordPress 7.1.3 core, 68 popular plugins (including file managers, security, backup and form plugins) and 10 themes: 63,509 scannable files. **No rule of 90% or more with whole-file remediation matched any file**, so automatic removal would delete nothing legitimate. The 10 flags left are pre-existing heuristic or review-level findings. Time: 106 s with 329 rules; 62 s with the 1.1 database. |
+| WordPress integration | **39 of 39** and **78 of 78** passed. The new checks cover: <ul><li>a verified shell removed during the scan that finds it;</li><li>a suspicious-only file kept;</li><li>a 30-day recovery copy, byte-identical;</li><li>0 days deleting with no copy;</li><li>nothing removed while the setting is off;</li><li>the sweep removing earlier findings;</li><li>core, injected-code and heuristic findings never removed.</li></ul> |
+| End-to-end UI | **43 of 43 passed**, including auto-removal on by default and switched off and on from the Protection screen. |
+| `WP_DEBUG` | `debug.log` empty for the whole run. |
+
 ## Results for 1.1.0 (2026-10-17)
 
 Environment: PHP 8.3.6, WordPress 7.1.3 on SQLite (single site), PHP built-in web server, Chromium through Playwright 1.56.1.

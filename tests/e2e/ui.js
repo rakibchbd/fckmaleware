@@ -32,6 +32,17 @@ const shots = process.argv[2] || require('os').tmpdir();
   await page.fill('#user_login', process.env.FCKMW_USER || 'admin'); await page.fill('#user_pass', process.env.FCKMW_PASS || 'admin');
   await page.click('#wp-submit'); await page.waitForLoadState();
 
+  // Automatic removal is on by default; the manual-review flows below need it off.
+  const setAutoRemove = async (on) => {
+    await page.goto(admin + 'fckmaleware-protection');
+    await page.locator('#fckmw-auto_remove_verified').setChecked(on, { force: true });
+    await page.click('button[type=submit]:has-text("Save protection settings")');
+    await page.waitForLoadState();
+    return page.isChecked('#fckmw-auto_remove_verified');
+  };
+  ok(await page.goto(admin + 'fckmaleware-protection').then(() => page.isChecked('#fckmw-auto_remove_verified')), 'verified malware removal is on by default');
+  ok(!(await setAutoRemove(false)), 'automatic removal can be switched off');
+
   // Navigation: one menu, five sections, legacy links redirect.
   await page.goto(admin + 'fckmaleware');
   ok(await page.locator('.fckmw-ring').count() === 1, 'overview shows the security score');
@@ -170,6 +181,8 @@ const shots = process.argv[2] || require('os').tmpdir();
   }
   await page.goto(admin + 'fckmaleware'); await page.screenshot({ path: shots + '/overview-mobile.png', fullPage: true });
 
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  ok(await setAutoRemove(true), 'automatic removal switched back on');
   ok(errors.length === 0, 'no JavaScript errors or native dialogs ' + errors.join(' | '));
   await browser.close();
 })().catch(e => { console.error(e); process.exit(1); });

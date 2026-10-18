@@ -48,6 +48,8 @@ final class Settings {
 			'upload_fail_mode'         => array( 'enum', 'allow', array( 'allow', 'reject' ) ),
 			// Remediation.
 			'auto_quarantine'          => array( 'bool', false ),
+			'auto_remove_verified'     => array( 'bool', true ),
+			'auto_remove_keep_days'    => array( 'int', 30, array( 0, 90 ) ),
 			'quarantine_retention'     => array( 'int', 0, array( 0, 3650 ) ),
 			'bulk_min_confidence'      => array( 'int', 80, array( 50, 100 ) ),
 			// Notifications.
